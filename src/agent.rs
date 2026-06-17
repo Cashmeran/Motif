@@ -4,7 +4,7 @@ use crate::history::{History, InfiniteHistory};
 use crate::hooks::{AgentHook, HookContext, RunContext};
 use crate::provider::LLMProvider;
 use crate::prompt::{PromptBuilder, SystemPrompt};
-use crate::tool::{ParallelExecutor, RegisteredTool, ToolExecutor};
+use crate::tool::{Executor, RegisteredTool, ToolExecutor};
 use crate::types::{
     FinishReason, LLMResponse, Message, SystemMessage,
     TimedMessage, ToolDefinition,
@@ -75,6 +75,7 @@ pub struct Agent {
     max_empty_retries: usize,
     length_continues: usize,
     max_length_continues: usize,
+    step_count: usize,
 }
 
 impl Agent {
@@ -83,7 +84,7 @@ impl Agent {
         Self {
             provider: Arc::new(provider),
             history: Box::new(InfiniteHistory::new()),
-            executor: Box::new(ParallelExecutor::new()),
+            executor: Box::new(Executor::parallel()),
             hooks: vec![],
             prompt: SystemPrompt::new("You are a helpful assistant."),
             prompt_builders: vec![],
@@ -95,6 +96,7 @@ impl Agent {
             max_empty_retries: 2,
             length_continues: 0,
             max_length_continues: 3,
+            step_count: 0,
         }
     }
 
@@ -240,8 +242,8 @@ impl Agent {
         }
 
         // Hook: before_llm (error-isolated — one failing hook won't block others)
-        let iteration = self.history.get_all().len();
-        let mut hook_ctx = HookContext::new(iteration, self.history.get_all().to_vec());
+        self.step_count += 1;
+        let mut hook_ctx = HookContext::new(self.step_count, self.history.get_all().to_vec());
         for hook in &self.hooks {
             if let Err(e) = hook.before_llm(&mut hook_ctx).await {
                 tracing::warn!("Hook.before_llm error: {}", e);
@@ -256,12 +258,14 @@ impl Agent {
 
         let elapsed = std::time::Duration::ZERO;
 
-        // Append assistant message to history
-        self.history.add(TimedMessage {
+        // Append assistant message to history + keep hook_ctx in sync
+        let assoc_msg = TimedMessage {
             message: Message::Assistant(response.message.clone()),
             timestamp: std::time::SystemTime::now(),
             elapsed,
-        });
+        };
+        self.history.add(assoc_msg.clone());
+        hook_ctx.messages.push(assoc_msg);
 
         // Hook: after_llm
         hook_ctx.response = Some(response.clone());
@@ -293,55 +297,49 @@ impl Agent {
 
                 let results = self.executor.execute(calls.clone()).await;
 
-                hook_ctx.tool_results = results.clone();
+                hook_ctx.tool_results.clone_from(&results);
                 for hook in &self.hooks {
                     if let Err(e) = hook.after_tools(&mut hook_ctx).await {
                         tracing::warn!("Hook.after_tools error: {}", e);
                     }
                 }
 
-                // Append tool results to history
-                for result in results {
-                    self.history.add(TimedMessage {
-                        message: Message::Tool(result.tool_message),
+                // Append tool results to history + keep hook_ctx in sync
+                for result in &results {
+                    let msg = TimedMessage {
+                        message: Message::Tool(result.tool_message.clone()),
                         timestamp: result.timestamp,
                         elapsed: result.elapsed,
-                    });
+                    };
+                    self.history.add(msg.clone());
+                    hook_ctx.messages.push(msg);
                 }
             }
         }
 
-        // Empty response retry (when no tool calls, content empty, not an error)
-        let is_empty_content = response.message.content.trim().is_empty();
-        let has_tool_calls = response.message.tool_calls.as_ref().map_or(false, |c| !c.is_empty());
+        // Empty response retry / Length continuation (check Length first)
+        let is_empty = response.message.content.trim().is_empty();
+        let has_tools = response.message.tool_calls.as_ref().map_or(false, |c| !c.is_empty());
 
-        if is_empty_content && !has_tool_calls {
-            if self.empty_retries < self.max_empty_retries {
-                self.empty_retries += 1;
-                tracing::debug!(
-                    "Empty response (retry {}/{}), continuing",
-                    self.empty_retries, self.max_empty_retries
-                );
+        if matches!(response.finish_reason, FinishReason::Length) {
+            if !is_empty && self.length_continues < self.max_length_continues {
+                self.length_continues += 1;
+                self.history.add(TimedMessage::new(Message::user("continue")));
+                tracing::debug!("Length finish, continuing ({}/{})", self.length_continues, self.max_length_continues);
                 return Ok(None);
             }
         } else {
-            self.empty_retries = 0; // reset on any non-empty response
+            self.length_continues = 0;
         }
 
-        // Length continuation: LLM output was truncated
-        if matches!(response.finish_reason, FinishReason::Length)
-            && !is_empty_content
-            && self.length_continues < self.max_length_continues
-        {
-            self.length_continues += 1;
-            self.history.add(TimedMessage::new(Message::user("continue")));
-            tracing::debug!(
-                "Length finish, continuing ({}/{})",
-                self.length_continues, self.max_length_continues
-            );
-            return Ok(None);
-        } else if !matches!(response.finish_reason, FinishReason::Length) {
-            self.length_continues = 0;
+        if is_empty && !has_tools {
+            if self.empty_retries < self.max_empty_retries {
+                self.empty_retries += 1;
+                tracing::debug!("Empty response (retry {}/{}), continuing", self.empty_retries, self.max_empty_retries);
+                return Ok(None);
+            }
+        } else {
+            self.empty_retries = 0;
         }
 
         // Check stop condition
@@ -404,6 +402,10 @@ impl Agent {
                 }
                 Ok(None) => continue,
                 Err(e) => {
+                    let mut error_ctx = HookContext::new(iterations, vec![]);
+                    for hook in &self.hooks {
+                        let _ = hook.on_error(&mut error_ctx, &e).await;
+                    }
                     run_ctx.error = Some(e.clone());
                     for hook in &self.hooks {
                         if let Err(e2) = hook.after_run(&mut run_ctx).await {

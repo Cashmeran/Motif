@@ -211,10 +211,10 @@ async fn test_stop_condition_after_n_tools() {
 
     let result = agent.chat("ping repeatedly").await.unwrap();
     // AfterNTools(2): stops when 2 tool results recorded.
-    // 1st LLM call → tool_call → execute → 1 tool msg
-    // 2nd LLM call → tool_call → execute → 2 tool msgs → stop
-    // Returns the content of the 2nd assistant message (empty from tool_call).
-    assert!(result.is_empty() || !result.is_empty()); // just verify it completed
+    // Returns the content of the 2nd assistant message.
+    let history = agent.history_ref().get_all();
+    let tool_msgs = history.iter().filter(|m| matches!(m.message, Message::Tool(_))).count();
+    assert!(tool_msgs >= 2, "Expected >=2 tool results, got {}", tool_msgs);
 }
 
 #[tokio::test]

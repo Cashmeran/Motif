@@ -71,50 +71,74 @@ pub trait ToolExecutor: Send + Sync {
     fn has(&self, name: &str) -> bool;
 }
 
-// --- ParallelExecutor ---
+// --- Executor ---
 
-pub struct ParallelExecutor {
+/// The default tool executor. Runs concurrent-safe tools in parallel,
+/// unsafe tools sequentially, preserving the original call order.
+pub struct Executor {
     tools: HashMap<String, Arc<dyn Tool>>,
+    parallel: bool,
 }
 
-impl ParallelExecutor {
-    pub fn new() -> Self {
-        Self {
-            tools: HashMap::new(),
-        }
+impl Executor {
+    pub fn parallel() -> Self {
+        Self { tools: HashMap::new(), parallel: true }
+    }
+    pub fn sequential() -> Self {
+        Self { tools: HashMap::new(), parallel: false }
     }
 }
 
-impl Default for ParallelExecutor {
-    fn default() -> Self {
-        Self::new()
-    }
+impl Default for Executor {
+    fn default() -> Self { Self::parallel() }
 }
 
 #[async_trait]
-impl ToolExecutor for ParallelExecutor {
+impl ToolExecutor for Executor {
     fn register(&mut self, name: String, tool: Arc<dyn Tool>) {
         self.tools.insert(name, tool);
     }
 
     async fn execute(&self, calls: Vec<ToolCall>) -> Vec<ToolResult> {
-        if calls.is_empty() {
-            return vec![];
+        if calls.is_empty() { return vec![]; }
+
+        if !self.parallel {
+            // Sequential path: simple loop, preserves order
+            let mut results = Vec::with_capacity(calls.len());
+            for call in calls {
+                let start = std::time::SystemTime::now();
+                let content = match self.tools.get(&call.function.name) {
+                    Some(t) => t.call(call.function.arguments).await,
+                    None => format!("Tool '{}' not found", call.function.name),
+                };
+                let elapsed = start.elapsed().unwrap_or_default();
+                results.push(ToolResult {
+                    tool_message: ToolMessage { tool_call_id: call.id, content },
+                    timestamp: start + elapsed, elapsed,
+                });
+            }
+            return results;
         }
 
-        // Partition: concurrent-safe tools run in parallel, unsafe ones sequentially
-        let (safe, unsafe_calls): (Vec<_>, Vec<_>) = calls.into_iter().partition(|call| {
+        // Parallel path: partition by concurrency safety, preserve order
+        let mut indexed: Vec<_> = calls.into_iter().enumerate().collect();
+        indexed.sort_by_key(|(_, call)| {
+            self.tools.get(&call.function.name)
+                .map(|t| if t.concurrency_safety() == ConcurrencySafety::ConcurrentSafe { 0 } else { 1 })
+                .unwrap_or(0)
+        });
+
+        let mut results: Vec<Option<ToolResult>> = vec![None; indexed.len()];
+
+        let (safe, unsafe_calls): (Vec<_>, Vec<_>) = indexed.into_iter().partition(|(_, call)| {
             self.tools.get(&call.function.name)
                 .map(|t| t.concurrency_safety() == ConcurrencySafety::ConcurrentSafe)
                 .unwrap_or(true)
         });
 
-        let mut results: Vec<ToolResult> = vec![];
-
-        // Run safe tools in parallel
         if !safe.is_empty() {
             use futures::future::join_all;
-            let batch: Vec<_> = join_all(safe.into_iter().map(|call| {
+            let batch = join_all(safe.into_iter().map(|(idx, call)| {
                 let tool = self.tools.get(&call.function.name).cloned();
                 async move {
                     let start = std::time::SystemTime::now();
@@ -123,84 +147,29 @@ impl ToolExecutor for ParallelExecutor {
                         None => format!("Tool '{}' not found", call.function.name),
                     };
                     let elapsed = start.elapsed().unwrap_or_default();
-                    ToolResult {
+                    (idx, ToolResult {
                         tool_message: ToolMessage { tool_call_id: call.id, content },
-                        timestamp: start + elapsed,
-                        elapsed,
-                    }
+                        timestamp: start + elapsed, elapsed,
+                    })
                 }
             })).await;
-            results = batch;
+            for (idx, r) in batch { results[idx] = Some(r); }
         }
 
-        // Run unsafe tools sequentially
-        for call in unsafe_calls {
+        for (idx, call) in unsafe_calls {
             let start = std::time::SystemTime::now();
             let content = match self.tools.get(&call.function.name) {
                 Some(t) => t.call(call.function.arguments).await,
                 None => format!("Tool '{}' not found", call.function.name),
             };
             let elapsed = start.elapsed().unwrap_or_default();
-            results.push(ToolResult {
+            results[idx] = Some(ToolResult {
                 tool_message: ToolMessage { tool_call_id: call.id, content },
-                timestamp: start + elapsed,
-                elapsed,
+                timestamp: start + elapsed, elapsed,
             });
         }
 
-        results
-    }
-
-    fn has(&self, name: &str) -> bool {
-        self.tools.contains_key(name)
-    }
-}
-
-// --- SequentialExecutor ---
-
-pub struct SequentialExecutor {
-    tools: HashMap<String, Arc<dyn Tool>>,
-}
-
-impl SequentialExecutor {
-    pub fn new() -> Self {
-        Self {
-            tools: HashMap::new(),
-        }
-    }
-}
-
-impl Default for SequentialExecutor {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-#[async_trait]
-impl ToolExecutor for SequentialExecutor {
-    fn register(&mut self, name: String, tool: Arc<dyn Tool>) {
-        self.tools.insert(name, tool);
-    }
-
-    async fn execute(&self, calls: Vec<ToolCall>) -> Vec<ToolResult> {
-        let mut results = Vec::with_capacity(calls.len());
-        for call in calls {
-            let start = std::time::SystemTime::now();
-            let content = match self.tools.get(&call.function.name) {
-                Some(t) => t.call(call.function.arguments).await,
-                None => format!("Tool '{}' not found", call.function.name),
-            };
-            let elapsed = start.elapsed().unwrap_or_default();
-            results.push(ToolResult {
-                tool_message: ToolMessage {
-                    tool_call_id: call.id,
-                    content,
-                },
-                timestamp: start + elapsed,
-                elapsed,
-            });
-        }
-        results
+        results.into_iter().map(|r| r.unwrap()).collect()
     }
 
     fn has(&self, name: &str) -> bool {
@@ -342,7 +311,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_parallel_executor_executes_tools() {
-        let mut exec = ParallelExecutor::new();
+        let mut exec = Executor::parallel();
         let tool = Arc::new(FunctionTool::new(|args: String| {
             Box::pin(async move { format!("got: {}", args) })
         }));
@@ -365,7 +334,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_tool_not_found_returns_error_message() {
-        let exec = ParallelExecutor::new();
+        let exec = Executor::parallel();
         let results = exec
             .execute(vec![ToolCall {
                 id: "call_1".into(),

@@ -6,13 +6,6 @@ pub trait History: Send + Sync {
     /// Append a message to history.
     fn add(&mut self, message: TimedMessage);
 
-    /// Append multiple messages.
-    fn add_batch(&mut self, messages: Vec<TimedMessage>) {
-        for msg in messages {
-            self.add(msg);
-        }
-    }
-
     /// Return all messages in chronological order.
     fn get_all(&self) -> &[TimedMessage];
 
@@ -74,12 +67,10 @@ mod tests {
     }
 
     #[test]
-    fn test_add_batch() {
+    fn test_multiple_adds() {
         let mut h = InfiniteHistory::new();
-        h.add_batch(vec![
-            TimedMessage::new(Message::user("a")),
-            TimedMessage::new(Message::user("b")),
-        ]);
+        h.add(TimedMessage::new(Message::user("a")));
+        h.add(TimedMessage::new(Message::user("b")));
         assert_eq!(h.get_all().len(), 2);
     }
 }

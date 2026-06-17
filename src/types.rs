@@ -91,14 +91,6 @@ impl Parameters {
     pub fn new(schema: Value) -> Self {
         Self(schema)
     }
-
-    pub fn empty() -> Self {
-        Self(serde_json::json!({
-            "type": "object",
-            "properties": {},
-            "required": []
-        }))
-    }
 }
 
 // --- LLM Response ---
@@ -133,8 +125,6 @@ pub struct LLMStream {
 pub enum StreamEvent {
     /// Text content delta.
     Content(String),
-    /// Tool call delta (partial JSON).
-    ToolCallDelta(String),
     /// Streaming has finished with the given reason.
     Finish(FinishReason),
 }

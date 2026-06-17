@@ -11,15 +11,6 @@ pub enum Error {
     #[error("JSON error: {0}")]
     Json(#[from] serde_json::Error),
 
-    #[error("Expected assistant or tool_calls message, got: {0}")]
-    UnexpectedMessage(String),
-
-    #[error("Tool '{0}' not found")]
-    ToolNotFound(String),
-
-    #[error("Hook error: {0}")]
-    HookError(String),
-
     #[error("{0}")]
     Custom(String),
 }
@@ -29,15 +20,9 @@ pub enum Error {
 impl Clone for Error {
     fn clone(&self) -> Self {
         match self {
-            Error::ApiError { status, body } => Error::ApiError {
-                status: *status,
-                body: body.clone(),
-            },
+            Error::ApiError { status, body } => Error::ApiError { status: *status, body: body.clone() },
             Error::Http(e) => Error::Custom(format!("Http: {}", e)),
             Error::Json(e) => Error::Custom(format!("Json: {}", e)),
-            Error::UnexpectedMessage(s) => Error::UnexpectedMessage(s.clone()),
-            Error::ToolNotFound(s) => Error::ToolNotFound(s.clone()),
-            Error::HookError(s) => Error::HookError(s.clone()),
             Error::Custom(s) => Error::Custom(s.clone()),
         }
     }
