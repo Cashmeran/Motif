@@ -194,4 +194,4 @@ pub enum StopCondition {
 3. **step() 是原子单位** — 外部控制循环，内部不藏策略
 4. **Hook全覆盖** — 所有外挂通过Hook插入
 5. **默认即用，皆可替换** — 合理默认值 + 全部可配置
-6. **零超出依赖** — tokio + serde + reqwest + async-trait，仅此
+6. **零超出依赖** — tokio + serde + serde_json + reqwest + async-trait + thiserror + schemars + futures + tracing，每个都有明确理由
