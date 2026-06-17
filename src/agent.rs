@@ -10,6 +10,12 @@ use crate::types::{
     TimedMessage, ToolDefinition,
 };
 
+fn normalize_json(json: &str) -> String {
+    serde_json::from_str::<serde_json::Value>(json)
+        .map(|v| v.to_string())
+        .unwrap_or_else(|_| json.to_string())
+}
+
 // --- StopCondition ---
 
 /// Determines when the agent loop should terminate.
@@ -158,10 +164,12 @@ impl Agent {
         let name = def.function.name.clone();
         self.tool_definitions.push(def);
         let tool = Arc::new(FunctionTool::new(move |json: String| {
-            Box::pin({
-                let args = serde_json::from_str::<Args>(&json)
-                    .unwrap_or_else(|e| panic!("Tool args parse error: {}", e));
-                f(args)
+            Box::pin(async move {
+                let args = match serde_json::from_str::<Args>(&json) {
+                    Ok(a) => a,
+                    Err(e) => return format!("[Invalid arguments: {}]. Expected JSON matching the tool schema. Check and retry.", e),
+                };
+                f(args).await
             })
         }));
         self.executor.register(name, tool);
@@ -183,10 +191,12 @@ impl Agent {
         self.tool_definitions.push(def);
         let tool = Arc::new(FunctionTool::new(move |json: String| {
             let instance = instance.clone();
-            Box::pin({
-                let args = serde_json::from_str::<Args>(&json)
-                    .unwrap_or_else(|e| panic!("Tool args parse error: {}", e));
-                method(instance, args)
+            Box::pin(async move {
+                let args = match serde_json::from_str::<Args>(&json) {
+                    Ok(a) => a,
+                    Err(e) => return format!("[Invalid arguments: {}]. Expected JSON matching the tool schema. Check and retry.", e),
+                };
+                method(instance, args).await
             })
         }));
         self.executor.register(name, tool);
@@ -253,16 +263,16 @@ impl Agent {
         }
 
         // Call LLM
+        let llm_start = std::time::Instant::now();
         let response = self
             .provider
             .call(&turn_messages, &self.tool_definitions)
             .await?;
+        let elapsed = llm_start.elapsed();
 
         if let Some(ref usage) = response.usage {
             self.total_tokens += usage.total_tokens as u64;
         }
-
-        let elapsed = std::time::Duration::ZERO;
 
         // Append assistant message to history + keep hook_ctx in sync
         let assoc_msg = TimedMessage {
@@ -286,7 +296,8 @@ impl Agent {
             if !calls.is_empty() {
                 // Track for OnStuck
                 for call in calls {
-                    let sig = format!("{}:{}", call.function.name, call.function.arguments);
+                    let normalized = normalize_json(&call.function.arguments);
+                    let sig = format!("{}:{}", call.function.name, normalized);
                     self.recent_tool_calls.push(sig);
                 }
                 if self.recent_tool_calls.len() > 20 {
@@ -408,7 +419,7 @@ impl Agent {
                 }
                 Ok(None) => continue,
                 Err(e) => {
-                    let mut error_ctx = HookContext::new(iterations, vec![]);
+                    let mut error_ctx = HookContext::new(iterations, self.history.get_all().to_vec());
                     for hook in &self.hooks {
                         let _ = hook.on_error(&mut error_ctx, &e).await;
                     }

@@ -64,16 +64,16 @@ impl BoundedHistory {
 impl History for BoundedHistory {
     fn add(&mut self, message: TimedMessage) {
         self.messages.push(message);
-        while self.messages.len() > self.capacity {
-            // Find the first non-system message to evict
-            let idx = self.messages.iter().position(|m| !matches!(m.message, crate::types::Message::System(_)));
-            if let Some(i) = idx {
-                self.messages.remove(i);
-            } else {
-                // All messages are system — evict the oldest anyway
-                self.messages.remove(0);
-            }
-        }
+        let excess = self.messages.len().saturating_sub(self.capacity);
+        if excess == 0 { return; }
+        // Drop oldest non-system messages. System messages are pinned.
+        let mut removed = 0;
+        self.messages.retain(|m| {
+            if removed >= excess { return true; }
+            if matches!(m.message, crate::types::Message::System(_)) { return true; }
+            removed += 1;
+            false
+        });
     }
 
     fn get_all(&self) -> &[TimedMessage] { &self.messages }

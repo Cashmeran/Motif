@@ -85,6 +85,7 @@ pub struct ToolFunction {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(transparent)]
 pub struct Parameters(Value);
 
 impl Parameters {

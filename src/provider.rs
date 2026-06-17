@@ -162,76 +162,103 @@ impl LLMProvider for OpenAIProvider {
         let url = format!("{}/chat/completions", self.base_url);
         let body = self.build_request_body(messages, tools, true);
 
-        let response = self
-            .client
-            .post(&url)
-            .header("Authorization", format!("Bearer {}", self.api_key))
-            .header("Content-Type", "application/json")
-            .json(&body)
-            .send()
-            .await?;
-
-        let status = response.status();
-        if !status.is_success() {
-            let body_text = response.text().await.unwrap_or_default();
-            return Err(Error::ApiError {
-                status: status.as_u16(),
-                body: body_text,
-            });
-        }
-
         let (tx, rx) = tokio::sync::mpsc::channel(64);
+
+        // Retry loop for transient errors
+        let max_retries = self.max_retries;
+        let retry_delay_ms = self.retry_delay_ms;
+        let client = self.client.clone();
+        let api_key = self.api_key.clone();
 
         tokio::spawn(async move {
             use futures::StreamExt;
-            let mut stream = response.bytes_stream();
-            let mut buffer = String::new();
+            let mut last_err: Option<crate::Error> = None;
 
-            while let Some(item) = stream.next().await {
-                let chunk = match item {
-                    Ok(bytes) => bytes,
-                    Err(_) => break,
+            for attempt in 0..=max_retries {
+                if attempt > 0 {
+                    tokio::time::sleep(std::time::Duration::from_millis(retry_delay_ms * attempt as u64)).await;
+                }
+
+                let response = match client.post(&url)
+                    .header("Authorization", format!("Bearer {}", &api_key))
+                    .header("Content-Type", "application/json")
+                    .json(&body)
+                    .send()
+                    .await
+                {
+                    Ok(r) => r,
+                    Err(e) => { last_err = Some(e.into()); continue; }
                 };
-                let chunk_str = String::from_utf8_lossy(&chunk);
-                buffer.push_str(&chunk_str);
 
-                // Process complete SSE lines
-                while let Some(line_end) = buffer.find('\n') {
-                    let line = buffer[..line_end].trim().to_string();
-                    buffer = buffer[line_end + 1..].to_string();
-
-                    if line.is_empty() || line.starts_with(':') {
+                let status = response.status();
+                if !status.is_success() {
+                    let code = status.as_u16();
+                    if code == 429 || code >= 500 {
+                        last_err = Some(Error::ApiError { status: code, body: response.text().await.unwrap_or_default() });
                         continue;
                     }
-                    if line == "data: [DONE]" {
-                        let _ = tx.send(StreamEvent::Finish(crate::types::FinishReason::Stop)).await;
-                        return;
-                    }
-                    if let Some(data) = line.strip_prefix("data: ") {
-                        if let Ok(json) = serde_json::from_str::<serde_json::Value>(data) {
-                            let choice = &json["choices"][0];
-                            let delta = &choice["delta"];
+                    last_err = Some(Error::ApiError { status: code, body: response.text().await.unwrap_or_default() });
+                    break;
+                }
 
-                            if let Some(content) = delta["content"].as_str() {
-                                if !content.is_empty() {
-                                    let _ = tx.send(StreamEvent::Content(content.to_string())).await;
+                // Stream the response
+                let mut stream = response.bytes_stream();
+                let mut buf: Vec<u8> = Vec::new();
+
+                loop {
+                    let item = stream.next().await;
+                    match item {
+                        Some(Ok(bytes)) => buf.extend_from_slice(&bytes),
+                        Some(Err(e)) => {
+                            tracing::warn!("SSE stream error: {}", e);
+                            let _ = tx.send(StreamEvent::Finish(crate::types::FinishReason::Custom("stream_error".into()))).await;
+                            return;
+                        }
+                        None => break,
+                    }
+
+                    // Process complete lines from byte buffer
+                    while let Some(pos) = buf.iter().position(|&b| b == b'\n') {
+                        let line_bytes = &buf[..pos];
+                        let line = std::str::from_utf8(line_bytes).unwrap_or("").trim().to_string();
+                        buf = buf[pos + 1..].to_vec();
+
+                        if line.is_empty() || line.starts_with(':') { continue; }
+                        if line == "data: [DONE]" {
+                            let _ = tx.send(StreamEvent::Finish(crate::types::FinishReason::Stop)).await;
+                            return;
+                        }
+                        if let Some(data) = line.strip_prefix("data: ") {
+                            if let Ok(json) = serde_json::from_str::<serde_json::Value>(data) {
+                                let choice = &json["choices"][0];
+                                let delta = &choice["delta"];
+                                if let Some(content) = delta["content"].as_str() {
+                                    if !content.is_empty() {
+                                        if tx.send(StreamEvent::Content(content.to_string())).await.is_err() { return; }
+                                    }
                                 }
-                            }
-                            if let Some(reason) = choice["finish_reason"].as_str() {
-                                let fr = match reason {
-                                    "stop" => crate::types::FinishReason::Stop,
-                                    "length" => crate::types::FinishReason::Length,
-                                    "tool_calls" => crate::types::FinishReason::ToolCalls,
-                                    _ => crate::types::FinishReason::Stop,
-                                };
-                                let _ = tx.send(StreamEvent::Finish(fr)).await;
-                                return;
+                                if let Some(reason) = choice["finish_reason"].as_str() {
+                                    let fr = match reason {
+                                        "stop" => crate::types::FinishReason::Stop,
+                                        "length" => crate::types::FinishReason::Length,
+                                        "tool_calls" => crate::types::FinishReason::ToolCalls,
+                                        _ => crate::types::FinishReason::Stop,
+                                    };
+                                    let _ = tx.send(StreamEvent::Finish(fr)).await;
+                                    return;
+                                }
                             }
                         }
                     }
                 }
+                // Stream ended normally
+                let _ = tx.send(StreamEvent::Finish(crate::types::FinishReason::Stop)).await;
+                return;
             }
-            let _ = tx.send(StreamEvent::Finish(crate::types::FinishReason::Stop)).await;
+            // All retries exhausted
+            let _ = tx.send(StreamEvent::Finish(crate::types::FinishReason::Custom(
+                format!("stream_error: {}", last_err.unwrap_or_else(|| crate::Error::Custom("max retries".into())))
+            ))).await;
         });
 
         Ok(LLMStream { receiver: rx })
