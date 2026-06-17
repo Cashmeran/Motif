@@ -120,6 +120,25 @@ pub struct LLMResponse {
     pub finish_reason: FinishReason,
 }
 
+// --- Streaming ---
+
+/// A streaming LLM response. The receiver yields `StreamEvent` items until
+/// the stream is exhausted (receiver is dropped by the provider).
+pub struct LLMStream {
+    pub receiver: tokio::sync::mpsc::Receiver<StreamEvent>,
+}
+
+/// Events emitted during a streaming LLM response.
+#[derive(Debug, Clone)]
+pub enum StreamEvent {
+    /// Text content delta.
+    Content(String),
+    /// Tool call delta (partial JSON).
+    ToolCallDelta(String),
+    /// Streaming has finished with the given reason.
+    Finish(FinishReason),
+}
+
 // --- Convenience constructors ---
 
 impl Message {

@@ -367,3 +367,77 @@ async fn test_live_stop_condition_on_stuck() {
     }
     // The OnStuck should have prevented infinite loops
 }
+
+/// Live tool: add two numbers (used by test_live_tool_macro)
+#[motif::tool]
+async fn live_add(
+    /// First number
+    a: f64,
+    /// Second number
+    b: f64,
+) -> String {
+    (a + b).to_string()
+}
+
+#[tokio::test]
+#[ignore]
+async fn test_live_tool_macro() {
+    let api_key = std::env::var("MOTIF_API_KEY").expect("MOTIF_API_KEY not set");
+    let base_url = std::env::var("MOTIF_BASE_URL")
+        .unwrap_or_else(|_| "https://api.deepseek.com/v1".into());
+    let model = std::env::var("MOTIF_MODEL").unwrap_or_else(|_| "deepseek-chat".into());
+
+    let provider = OpenAIProvider::new(&base_url, &api_key, &model);
+    let mut agent = Agent::new(provider)
+        .system("你是一个计算器。使用live_add工具做加法。用中文回复。")
+        .tool_fn(live_add);
+
+    let result = agent.chat("计算 3.5 + 2.1").await.unwrap();
+    println!("LIVE TOOL MACRO: {}", result);
+    assert!(!result.is_empty());
+    assert!(result.contains("5.6"));
+}
+
+// --- #[tool] macro tests ---
+
+/// A test tool
+#[motif::tool]
+async fn greet(
+    /// Name to greet
+    name: String,
+) -> String {
+    format!("Hello, {}!", name)
+}
+
+#[tokio::test]
+async fn test_tool_macro_registration() {
+    let provider = SeqProvider::new(vec![
+        LLMResponse {
+            message: AssistantMessage {
+                content: String::new(),
+                tool_calls: Some(vec![ToolCall {
+                    id: "call_1".into(),
+                    call_type: "function".into(),
+                    function: FunctionCall {
+                        name: "greet".into(),
+                        arguments: r#"{"name":"World"}"#.into(),
+                    },
+                }]),
+            },
+            finish_reason: FinishReason::ToolCalls,
+        },
+        text("Greeting sent!"),
+    ]);
+
+    let mut agent = Agent::new(provider)
+        .system("You greet people.")
+        .tool_fn(greet);
+
+    let result = agent.chat("Greet World").await.unwrap();
+    assert_eq!(result, "Greeting sent!");
+
+    let history = agent.history_ref().get_all();
+    assert!(history.iter().any(|m| {
+        matches!(&m.message, Message::Tool(tm) if tm.content.contains("Hello, World!"))
+    }));
+}

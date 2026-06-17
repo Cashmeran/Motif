@@ -1,17 +1,33 @@
 use async_trait::async_trait;
-use crate::types::{LLMResponse, Message, ToolDefinition};
+use crate::types::{LLMResponse, LLMStream, Message, StreamEvent, ToolDefinition};
 use crate::error::Error;
 
-/// LLM Provider abstraction. Implementations handle API-specific details
-/// (auth headers, base URLs, response parsing).
+/// LLM Provider abstraction with streaming support.
 #[async_trait]
 pub trait LLMProvider: Send + Sync {
-    /// Send messages and tool definitions to the LLM, returning its response.
+    /// Non-streaming call — used for internal agent decision-making.
     async fn call(
         &self,
         messages: &[Message],
         tools: &[ToolDefinition],
     ) -> crate::Result<LLMResponse>;
+
+    /// Streaming call — for UI rendering. Default falls back to `call()`.
+    async fn call_stream(
+        &self,
+        messages: &[Message],
+        tools: &[ToolDefinition],
+    ) -> crate::Result<LLMStream> {
+        let response = self.call(messages, tools).await?;
+        let (tx, rx) = tokio::sync::mpsc::channel(2);
+        let content = response.message.content.clone();
+        let reason = response.finish_reason.clone();
+        tokio::spawn(async move {
+            let _ = tx.send(StreamEvent::Content(content)).await;
+            let _ = tx.send(StreamEvent::Finish(reason)).await;
+        });
+        Ok(LLMStream { receiver: rx })
+    }
 }
 
 // --- OpenAI-compatible implementation ---
@@ -104,7 +120,10 @@ impl LLMProvider for OpenAIProvider {
                             call_type: tc["type"].as_str().unwrap_or("function").to_string(),
                             function: crate::types::FunctionCall {
                                 name: tc["function"]["name"].as_str().unwrap_or("").to_string(),
-                                arguments: tc["function"]["arguments"].to_string(),
+                                arguments: tc["function"]["arguments"]
+                                    .as_str()
+                                    .unwrap_or("{}")
+                                    .to_string(),
                             },
                         })
                     })
@@ -130,6 +149,98 @@ impl LLMProvider for OpenAIProvider {
             },
             finish_reason,
         })
+    }
+
+    async fn call_stream(
+        &self,
+        messages: &[Message],
+        tools: &[ToolDefinition],
+    ) -> crate::Result<LLMStream> {
+        let url = format!("{}/chat/completions", self.base_url);
+
+        let mut body = serde_json::json!({
+            "model": self.model,
+            "messages": messages,
+            "stream": true,
+        });
+
+        if !tools.is_empty() {
+            body["tools"] = serde_json::to_value(tools)?;
+        }
+
+        let response = self
+            .client
+            .post(&url)
+            .header("Authorization", format!("Bearer {}", self.api_key))
+            .header("Content-Type", "application/json")
+            .json(&body)
+            .send()
+            .await?;
+
+        let status = response.status();
+        if !status.is_success() {
+            let body_text = response.text().await.unwrap_or_default();
+            return Err(Error::ApiError {
+                status: status.as_u16(),
+                body: body_text,
+            });
+        }
+
+        let (tx, rx) = tokio::sync::mpsc::channel(64);
+
+        tokio::spawn(async move {
+            use futures::StreamExt;
+            let mut stream = response.bytes_stream();
+            let mut buffer = String::new();
+
+            while let Some(item) = stream.next().await {
+                let chunk = match item {
+                    Ok(bytes) => bytes,
+                    Err(_) => break,
+                };
+                let chunk_str = String::from_utf8_lossy(&chunk);
+                buffer.push_str(&chunk_str);
+
+                // Process complete SSE lines
+                while let Some(line_end) = buffer.find('\n') {
+                    let line = buffer[..line_end].trim().to_string();
+                    buffer = buffer[line_end + 1..].to_string();
+
+                    if line.is_empty() || line.starts_with(':') {
+                        continue;
+                    }
+                    if line == "data: [DONE]" {
+                        let _ = tx.send(StreamEvent::Finish(crate::types::FinishReason::Stop)).await;
+                        return;
+                    }
+                    if let Some(data) = line.strip_prefix("data: ") {
+                        if let Ok(json) = serde_json::from_str::<serde_json::Value>(data) {
+                            let choice = &json["choices"][0];
+                            let delta = &choice["delta"];
+
+                            if let Some(content) = delta["content"].as_str() {
+                                if !content.is_empty() {
+                                    let _ = tx.send(StreamEvent::Content(content.to_string())).await;
+                                }
+                            }
+                            if let Some(reason) = choice["finish_reason"].as_str() {
+                                let fr = match reason {
+                                    "stop" => crate::types::FinishReason::Stop,
+                                    "length" => crate::types::FinishReason::Length,
+                                    "tool_calls" => crate::types::FinishReason::ToolCalls,
+                                    _ => crate::types::FinishReason::Stop,
+                                };
+                                let _ = tx.send(StreamEvent::Finish(fr)).await;
+                                return;
+                            }
+                        }
+                    }
+                }
+            }
+            let _ = tx.send(StreamEvent::Finish(crate::types::FinishReason::Stop)).await;
+        });
+
+        Ok(LLMStream { receiver: rx })
     }
 }
 

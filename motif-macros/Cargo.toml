@@ -1,0 +1,13 @@
+[package]
+name = "motif-macros"
+version = "0.2.0"
+edition = "2021"
+description = "Procedural macros for the Motif agent framework"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+syn = { version = "2", features = ["full"] }
+quote = "1"
+proc-macro2 = "1"
