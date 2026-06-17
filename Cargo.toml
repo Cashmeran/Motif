@@ -4,6 +4,10 @@ version = "0.1.0"
 edition = "2021"
 description = "Minimal, extensible Rust agent core"
 license = "MIT"
+keywords = ["agent", "llm", "ai", "tool-use"]
+categories = ["development-tools", "web-programming"]
+repository = "https://github.com/example/motif"
+homepage = "https://github.com/example/motif"
 
 [dependencies]
 tokio = { version = "1", features = ["full"] }

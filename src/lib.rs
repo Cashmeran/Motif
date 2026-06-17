@@ -1,3 +1,34 @@
+//! # Motif
+//!
+//! A minimal, extensible Rust agent core. Compose an [`Agent`] with
+//! a provider, tools, hooks, and history — then call [`Agent::chat`].
+//!
+//! ## Quick start
+//!
+//! ```rust,no_run
+//! use motif::*;
+//!
+//! #[tokio::main]
+//! async fn main() -> motif::Result<()> {
+//!     let provider = OpenAIProvider::new(
+//!         "https://api.deepseek.com/v1",
+//!         "sk-...",
+//!         "deepseek-chat",
+//!     );
+//!
+//!     let echo = ToolDef::new("echo", "Echo back input")
+//!         .build(|args: String| async move { args });
+//!
+//!     let mut agent = Agent::new(provider)
+//!         .system("You are a helpful assistant.")
+//!         .tool(echo);
+//!
+//!     let response = agent.chat("Hello!").await?;
+//!     println!("{}", response);
+//!     Ok(())
+//! }
+//! ```
+
 mod agent;
 mod error;
 mod history;
