@@ -20,7 +20,7 @@
 //!         .build(|args: String| async move { args });
 //!
 //!     let mut agent = Agent::new(provider)
-//!         .system("You are a helpful assistant.")
+//!         .model("deepseek-chat")
 //!         .tool(echo);
 //!
 //!     let response = agent.chat("Hello!").await?;

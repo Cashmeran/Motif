@@ -79,7 +79,7 @@ async fn test_full_agent_lifecycle() {
         });
 
     let mut agent = Agent::new(provider)
-        .system("You are a calculator. Use the add tool to answer.")
+        
         .tool(add_tool);
 
     let result = agent.chat("What is 1+2?").await.unwrap();
@@ -143,7 +143,7 @@ async fn test_multiple_tools_in_one_turn() {
         });
 
     let mut agent = Agent::new(provider)
-        .system("You have text tools.")
+        
         .tool(upper)
         .tool(reverse);
 
@@ -179,7 +179,7 @@ async fn test_external_tool_integration() {
     )];
 
     let mut agent = Agent::new(provider)
-        .system("Search assistant")
+        
         .external_tools(defs, |_name, _args| {
             "External result: found 3 items".to_string()
         });
@@ -208,7 +208,7 @@ async fn test_stop_condition_after_n_tools() {
         .build(|_args: String| async { "pong".to_string() });
 
     let mut agent = Agent::new(provider)
-        .system("test")
+        
         .tool(ping)
         .stop_when(StopCondition::AfterNTools(2));
 
@@ -228,7 +228,7 @@ async fn test_custom_stop_condition() {
     ]);
 
     let mut agent = Agent::new(provider)
-        .system("test")
+        
         .stop_when(StopCondition::Custom(Arc::new(|resp, _history| {
             resp.message.content.len() > 10
         })));
@@ -253,7 +253,7 @@ async fn test_system_prompt_injected() {
     let provider = SeqProvider::new(vec![text("I am a test bot")]);
 
     let mut agent = Agent::new(provider)
-        .system("You are a test bot. Reply with your identity.");
+        ;
 
     let result = agent.chat("who are you?").await.unwrap();
     assert_eq!(result, "I am a test bot");
@@ -270,7 +270,7 @@ async fn test_prompt_builder_extension() {
 
     let provider = SeqProvider::new(vec![text("ok")]);
     let mut agent = Agent::new(provider)
-        .system("Base prompt")
+        
         .prompt_builder(TimeBuilder);
 
     let result = agent.chat("test").await.unwrap();
@@ -286,7 +286,7 @@ async fn test_live_token_counting() {
     let base_url = std::env::var("MOTIF_BASE_URL").unwrap_or_else(|_| "https://api.deepseek.com/v1".into());
     let model = std::env::var("MOTIF_MODEL").unwrap_or_else(|_| "deepseek-chat".into());
     let provider = OpenAIProvider::new(&base_url, &api_key, &model);
-    let mut agent = Agent::new(provider).system("test");
+    let mut agent = Agent::new(provider);
 
     let before = agent.total_tokens_used();
     let _ = agent.chat("Hello").await.unwrap();
@@ -305,7 +305,7 @@ async fn test_live_simple_chat() {
 
     let provider = OpenAIProvider::new(&base_url, &api_key, &model);
     let mut agent = Agent::new(provider)
-        .system("你是一个有帮助的助手。用中文回复。");
+        ;
 
     let result = agent.chat("你好，请用一句话介绍你自己").await.unwrap();
     println!("LIVE RESPONSE: {}", result);
@@ -330,7 +330,7 @@ async fn test_live_tool_use() {
 
     let provider = OpenAIProvider::new(&base_url, &api_key, &model);
     let mut agent = Agent::new(provider)
-        .system("你是一个数学助手。用工具计算。用中文回复。")
+        
         .tool(calculator);
 
     let result = agent.chat("请计算 3 * 14").await.unwrap();
@@ -353,7 +353,7 @@ async fn test_live_streaming_structure() {
 
     let provider = OpenAIProvider::new(&base_url, &api_key, &model);
     let mut agent = Agent::new(provider)
-        .system("You reply in exactly 3 words. No more, no less.");
+        ;
 
     let result = agent.chat("What is Rust?").await.unwrap();
     println!("LIVE STREAMING STRUCTURE: {}", result);
@@ -375,7 +375,7 @@ async fn test_live_stop_condition_on_stuck() {
 
     let provider = OpenAIProvider::new(&base_url, &api_key, &model);
     let mut agent = Agent::new(provider)
-        .system("你是一个助手。当你被要求重复做某事时，调用echo工具。如果工具返回了相同的结果，停止。")
+        
         .tool(echo)
         .stop_when(StopCondition::OnStuck { max_repeats: 3 });
 
@@ -408,7 +408,7 @@ async fn test_live_tool_macro() {
 
     let provider = OpenAIProvider::new(&base_url, &api_key, &model);
     let mut agent = Agent::new(provider)
-        .system("你是一个计算器。使用live_add工具做加法。用中文回复。")
+        
         .tool_fn(live_add);
 
     let result = agent.chat("计算 3.5 + 2.1").await.unwrap();
@@ -450,7 +450,7 @@ async fn test_tool_macro_registration() {
     ]);
 
     let mut agent = Agent::new(provider)
-        .system("You greet people.")
+        
         .tool_fn(greet);
 
     let result = agent.chat("Greet World").await.unwrap();
@@ -507,7 +507,7 @@ async fn test_tool_impl_block() {
 
     let counter = Counter { value: Arc::new(Mutex::new(0)) };
     let mut agent = Agent::new(provider)
-        .system("You increment counters.")
+        
         .bind(counter, Counter::increment);
 
     let result = agent.chat("increment by 5").await.unwrap();
@@ -528,7 +528,7 @@ async fn test_empty_user_message() {
     let provider = SeqProvider::new(vec![
         text("I received an empty message"),
     ]);
-    let mut agent = Agent::new(provider).system("test");
+    let mut agent = Agent::new(provider);
     let result = agent.chat("").await.unwrap();
     assert!(!result.is_empty());
 }
@@ -543,7 +543,7 @@ async fn test_unicode_in_tool_args() {
         let v: serde_json::Value = serde_json::from_str(&args).unwrap_or_default();
         v["text"].as_str().unwrap_or("???").to_string()
     });
-    let mut agent = Agent::new(provider).system("test").tool(echo);
+    let mut agent = Agent::new(provider).tool(echo);
     let result = agent.chat("echo unicode").await.unwrap();
     assert_eq!(result, "done");
     let h = agent.history_ref().get_all();
@@ -566,7 +566,7 @@ async fn test_tool_returns_error_string() {
                 "ok".to_string()
             }
         });
-    let mut agent = Agent::new(provider).system("test").tool(risky);
+    let mut agent = Agent::new(provider).tool(risky);
     let result = agent.chat("try risky op").await.unwrap();
     // Agent should receive the error string and try again
     assert!(!result.is_empty());
@@ -594,7 +594,7 @@ async fn test_tool_receives_malformed_json() {
     ]);
     let parse_tool = ToolDef::new("parse", "Parse JSON")
         .build(|args: String| async move { format!("got: {}", args) });
-    let mut agent = Agent::new(provider).system("test").tool(parse_tool);
+    let mut agent = Agent::new(provider).tool(parse_tool);
     let result = agent.chat("parse bad json").await.unwrap();
     assert_eq!(result, "recovered");
 }
@@ -606,7 +606,7 @@ async fn test_multi_round_conversation() {
         text("Sure, let me look that up."),
         text("Here's what I found: ..."),
     ]);
-    let mut agent = Agent::new(provider).system("You are a helpful assistant.");
+    let mut agent = Agent::new(provider);
     let r1 = agent.chat("Hi").await.unwrap();
     assert!(r1.len() > 0);
     let r2 = agent.chat("Can you help?").await.unwrap();
@@ -624,7 +624,7 @@ async fn test_stop_condition_never_requires_external_control() {
     let responses: Vec<_> = (0..10).map(|i| text(&format!("msg{}", i))).collect();
     let provider = SeqProvider::new(responses);
     let mut agent = Agent::new(provider)
-        .system("test")
+        
         .stop_when(StopCondition::Never)
         .max_iterations(5); // safety cap: 5
 
@@ -644,7 +644,7 @@ async fn test_on_stuck_exact_boundary() {
     let provider = SeqProvider::new(responses);
     let ping = ToolDef::new("ping", "Ping").build(|_args: String| async { "pong".to_string() });
     let mut agent = Agent::new(provider)
-        .system("test")
+        
         .tool(ping)
         .stop_when(StopCondition::OnStuck { max_repeats: 3 });
 
@@ -664,7 +664,7 @@ async fn test_empty_response_retry_limit() {
         LLMResponse { message: AssistantMessage { content: String::new(), tool_calls: None }, finish_reason: FinishReason::Stop, usage: None },
         text("finally something"),
     ]);
-    let mut agent = Agent::new(provider).system("test");
+    let mut agent = Agent::new(provider);
     let result = agent.chat("trigger empty").await.unwrap();
     assert_eq!(result, "finally something");
 }
@@ -675,7 +675,7 @@ async fn test_length_continuation() {
         LLMResponse { message: AssistantMessage { content: "part1".into(), tool_calls: None }, finish_reason: FinishReason::Length, usage: None },
         text("part2"),
     ]);
-    let mut agent = Agent::new(provider).system("test");
+    let mut agent = Agent::new(provider);
     let result = agent.chat("continue").await.unwrap();
     assert_eq!(result, "part2");
     let h = agent.history_ref().get_all();
@@ -701,7 +701,7 @@ async fn test_tool_not_found_message_includes_available() {
     ]);
     let real_tool = ToolDef::new("real_tool", "A real tool")
         .build(|_args: String| async { "real".to_string() });
-    let mut agent = Agent::new(provider).system("test").tool(real_tool);
+    let mut agent = Agent::new(provider).tool(real_tool);
     let result = agent.chat("test").await.unwrap();
     assert_eq!(result, "ok");
     let h = agent.history_ref().get_all();
@@ -723,7 +723,7 @@ async fn test_many_tools_registered() {
     responses.push(text("all done"));
 
     let provider = SeqProvider::new(responses);
-    let mut agent = Agent::new(provider).system("test");
+    let mut agent = Agent::new(provider);
     for i in 0..10 {
         let tool = ToolDef::new(&format!("tool{}", i), &format!("Tool number {}", i))
             .build(move |_args: String| async move { format!("result{}", i) });
@@ -750,7 +750,7 @@ async fn test_many_parallel_tool_calls() {
         text("batch done"),
     ]);
     let echo = ToolDef::new("echo", "Echo").build(|args: String| async move { format!("echo:{}", args) });
-    let mut agent = Agent::new(provider).system("test").tool(echo);
+    let mut agent = Agent::new(provider).tool(echo);
     let result = agent.chat("batch").await.unwrap();
     assert_eq!(result, "batch done");
     let tool_msgs: Vec<_> = agent.history_ref().get_all().iter()
@@ -792,7 +792,7 @@ async fn test_mixed_concurrency_safety() {
     exec.register("safe_op".into(), Arc::new(SafeTool));
     exec.register("unsafe_op".into(), Arc::new(UnsafeTool));
 
-    let mut agent = Agent::new(provider).system("test").executor(exec);
+    let mut agent = Agent::new(provider).executor(exec);
     let result = agent.chat("test mix").await.unwrap();
     assert_eq!(result, "mixed done");
 }
@@ -803,7 +803,7 @@ async fn test_agent_reuse_same_history() {
         text("Hello!"),
         text("How are you?"),
     ]);
-    let mut agent = Agent::new(provider).system("test");
+    let mut agent = Agent::new(provider);
     let r1 = agent.chat("Hi").await.unwrap();
     assert_eq!(r1, "Hello!");
     let r2 = agent.chat("And you?").await.unwrap();
@@ -843,7 +843,7 @@ async fn test_live_multi_tool_conversation() {
         });
 
     let mut agent = Agent::new(live_provider())
-        .system("你是一个助手。用工具回答问题。用中文回复。")
+        
         .tool(weather)
         .tool(time);
 
@@ -856,7 +856,7 @@ async fn test_live_multi_tool_conversation() {
 #[ignore]
 async fn test_live_long_output() {
     let mut agent = Agent::new(live_provider())
-        .system("You are a storyteller. Tell a detailed story when asked.")
+        
         .max_iterations(50);
 
     let result = agent.chat("讲一个100字的短故事").await.unwrap();
@@ -880,7 +880,7 @@ async fn test_live_error_recovery_tool() {
         });
 
     let mut agent = Agent::new(live_provider())
-        .system("你是一个搜索助手。用search工具。如果工具返回错误，尝试修改查询重试。用中文回复。")
+        
         .tool(search);
 
     let result = agent.chat("搜索 Rust agent framework").await.unwrap();
@@ -892,7 +892,7 @@ async fn test_live_error_recovery_tool() {
 #[ignore]
 async fn test_live_many_rounds() {
     let mut agent = Agent::new(live_provider())
-        .system("You are a concise assistant. Reply in ONE sentence.")
+        
         .max_iterations(30);
 
     let r1 = agent.chat("What is Rust?").await.unwrap();
@@ -918,7 +918,7 @@ async fn test_live_many_rounds() {
 #[ignore]
 async fn test_live_system_prompt_obedience() {
     let mut agent = Agent::new(live_provider())
-        .system("You are a calculator that ONLY responds with numbers. Never use words. Never explain.");
+        ;
 
     let result = agent.chat("1 + 1 = ?").await.unwrap();
     println!("LIVE OBEDIENCE: {}", result);
@@ -937,7 +937,7 @@ async fn test_live_custom_temperature() {
         .with_body("temperature", 0.0);
 
     let mut agent = Agent::new(provider)
-        .system("Reply in exactly 5 words.");
+        ;
 
     let r1 = agent.chat("What is Rust?").await.unwrap();
     let r2 = agent.chat("What is Rust?").await.unwrap();
@@ -959,7 +959,7 @@ async fn test_live_name_attribute() {
     }
 
     let mut agent = Agent::new(live_provider())
-        .system("You have a web_lookup tool. Use it. Reply in Chinese.")
+        
         .tool_fn(search_web);
 
     let result = agent.chat("用web_lookup查找Rust教程").await.unwrap();

@@ -3,7 +3,7 @@ use std::sync::Arc;
 use crate::history::{History, InfiniteHistory};
 use crate::hooks::{AgentHook, HookContext, RunContext};
 use crate::provider::LLMProvider;
-use crate::prompt::{PromptBuilder, SystemPrompt};
+use crate::prompt::{self, Prompt, PromptBuilder};
 use crate::tool::{Executor, RegisteredTool, ToolExecutor};
 use crate::types::{
     FinishReason, LLMResponse, Message, SystemMessage,
@@ -65,9 +65,10 @@ pub struct Agent {
     history: Box<dyn History>,
     executor: Box<dyn ToolExecutor>,
     hooks: Vec<Box<dyn AgentHook>>,
-    prompt: SystemPrompt,
+    prompt: Prompt,
     prompt_builders: Vec<Box<dyn PromptBuilder>>,
     tool_definitions: Vec<ToolDefinition>,
+    model: String,
     stop_condition: StopCondition,
     recent_tool_calls: Vec<String>, // tracks tool_name+args for OnStuck
     max_iterations: usize,
@@ -87,9 +88,10 @@ impl Agent {
             history: Box::new(InfiniteHistory::new()),
             executor: Box::new(Executor::parallel()),
             hooks: vec![],
-            prompt: SystemPrompt::new("You are a helpful assistant."),
+            prompt: Prompt::new(),
             prompt_builders: vec![],
             tool_definitions: vec![],
+            model: String::new(),
             stop_condition: StopCondition::default(),
             recent_tool_calls: vec![],
             max_iterations: 100,
@@ -102,19 +104,17 @@ impl Agent {
         }
     }
 
-    /// Set the maximum number of LLM calls before the agent stops.
-    /// Defaults to 100. Set to 0 for no limit.
-    pub fn max_iterations(mut self, n: usize) -> Self {
-        self.max_iterations = n;
-        self
+    /// Set the model name for runtime context injection in user messages.
+    pub fn model(mut self, model: impl Into<String>) -> Self { self.model = model.into(); self }
+
+    pub fn max_iterations(mut self, n: usize) -> Self { self.max_iterations = n; self }
+
+    fn refresh_tools(&self) {
+        let json = serde_json::to_string(&self.tool_definitions).unwrap_or_default();
+        self.prompt.freeze_tools(&json);
     }
 
     // --- Builder methods ---
-
-    pub fn system(mut self, prompt: impl Into<String>) -> Self {
-        self.prompt = SystemPrompt::new(prompt);
-        self
-    }
 
     pub fn history(mut self, history: impl History + 'static) -> Self {
         self.history = Box::new(history);
@@ -142,6 +142,7 @@ impl Agent {
         let name = def.function.name.clone();
         self.tool_definitions.push(def);
         self.executor.register(name, tool);
+        self.refresh_tools();
         self
     }
 
@@ -164,6 +165,7 @@ impl Agent {
             })
         }));
         self.executor.register(name, tool);
+        self.refresh_tools();
         self
     }
 
@@ -188,6 +190,7 @@ impl Agent {
             })
         }));
         self.executor.register(name, tool);
+        self.refresh_tools();
         self
     }
 
@@ -212,6 +215,7 @@ impl Agent {
             );
         }
         self.tool_definitions.extend(defs);
+        self.refresh_tools();
         self
     }
 
@@ -226,16 +230,12 @@ impl Agent {
     /// calls, append results to history. Returns `Ok(Some(content))` if the
     /// loop should stop, `Ok(None)` to continue.
     pub async fn step(&mut self) -> crate::Result<Option<String>> {
-        // Build the prompt with extensions
-        let mut prompt = self.prompt.clone();
-        for builder in &self.prompt_builders {
-            if let Some(block) = builder.build() {
-                prompt = prompt.extend(block);
-            }
-        }
-        let system_msg = Message::System(SystemMessage {
-            content: prompt.build(),
-        });
+        // Build L2 extensions from registered PromptBuilders
+        let extensions: Vec<String> = self.prompt_builders.iter()
+            .filter_map(|b| b.build())
+            .collect();
+        let prompt_text = self.prompt.build(&extensions);
+        let system_msg = Message::System(SystemMessage { content: prompt_text });
 
         // Assemble messages for this turn
         let mut turn_messages = vec![system_msg];
@@ -424,9 +424,13 @@ impl Agent {
         }
     }
 
-    /// Send a user message and run the loop to completion.
-    pub async fn chat(&mut self, prompt: impl Into<String>) -> crate::Result<String> {
-        self.history.add(TimedMessage::new(Message::user(prompt)));
+    /// Send a user message and run to completion.
+    /// Runtime context (date/model) is prepended to the message.
+    pub async fn chat(&mut self, content: impl Into<String>) -> crate::Result<String> {
+        let content = content.into();
+        let ctx = prompt::runtime_context(&self.model);
+        let full = if content.is_empty() { ctx } else { format!("{}\n{}", ctx, content) };
+        self.history.add(TimedMessage::new(Message::user(full)));
         self.run().await
     }
 
@@ -512,7 +516,7 @@ mod tests {
     #[tokio::test]
     async fn test_agent_text_response_stops_loop() {
         let provider = MockProvider::new(vec![mock_text_response("Hello!")]);
-        let mut agent = Agent::new(provider).system("test");
+        let mut agent = Agent::new(provider);
 
         let result = agent.chat("hi").await.unwrap();
         assert_eq!(result, "Hello!");
@@ -531,7 +535,7 @@ mod tests {
             .build(|_args: String| async { "echo: hi".to_string() });
 
         let mut agent = Agent::new(provider)
-            .system("test")
+            
             .tool(echo_tool);
 
         let result = agent.chat("echo hi").await.unwrap();
@@ -555,7 +559,7 @@ mod tests {
             .build(|_args: String| async { "echo".to_string() });
 
         let mut agent = Agent::new(provider)
-            .system("test")
+            
             .tool(echo_tool)
             .stop_when(StopCondition::OnStuck { max_repeats: 3 });
 
@@ -595,7 +599,7 @@ mod tests {
             after_count: AtomicUsize::new(0),
         };
 
-        let mut agent = Agent::new(provider).system("test").hook(hook);
+        let mut agent = Agent::new(provider).hook(hook);
 
         agent.chat("hello").await.unwrap();
         // Hook was called — the hook moved into the agent, so we can't inspect
@@ -622,7 +626,7 @@ mod tests {
         )];
 
         let mut agent = Agent::new(provider)
-            .system("test")
+            
             .external_tools(defs, |name, args| {
                 format!("external {} called with {}", name, args)
             });
@@ -639,7 +643,7 @@ mod tests {
         ]);
 
         let mut agent = Agent::new(provider)
-            .system("test")
+            
             .stop_when(StopCondition::Never);
 
         // Manually step
