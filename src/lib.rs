@@ -35,7 +35,7 @@ mod history;
 mod hooks;
 mod prompt;
 mod provider;
-mod tool;
+pub mod tool;
 mod types;
 
 pub use agent::*;

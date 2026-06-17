@@ -497,3 +497,448 @@ async fn test_tool_impl_block() {
         matches!(&m.message, Message::Tool(tm) if tm.content == "5")
     }));
 }
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Edge case tests
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[tokio::test]
+async fn test_empty_user_message() {
+    let provider = SeqProvider::new(vec![
+        text("I received an empty message"),
+    ]);
+    let mut agent = Agent::new(provider).system("test");
+    let result = agent.chat("").await.unwrap();
+    assert!(!result.is_empty());
+}
+
+#[tokio::test]
+async fn test_unicode_in_tool_args() {
+    let provider = SeqProvider::new(vec![
+        tool_call("echo", r#"{"text":"你好世界 🌍 émoji test"}"#),
+        text("done"),
+    ]);
+    let echo = ToolDef::new("echo", "Echo").build(|args: String| async move {
+        let v: serde_json::Value = serde_json::from_str(&args).unwrap_or_default();
+        v["text"].as_str().unwrap_or("???").to_string()
+    });
+    let mut agent = Agent::new(provider).system("test").tool(echo);
+    let result = agent.chat("echo unicode").await.unwrap();
+    assert_eq!(result, "done");
+    let h = agent.history_ref().get_all();
+    assert!(h.iter().any(|m| {
+        matches!(&m.message, Message::Tool(tm) if tm.content.contains("你好"))
+    }));
+}
+
+#[tokio::test]
+async fn test_tool_returns_error_string() {
+    let provider = SeqProvider::new(vec![
+        tool_call("risky", r#"{"action":"delete"}"#),
+        text("I'll try another way"),
+    ]);
+    let risky = ToolDef::new("risky", "Risky operation")
+        .build(|args: String| async move {
+            if args.contains("delete") {
+                "Error: operation not permitted".to_string()
+            } else {
+                "ok".to_string()
+            }
+        });
+    let mut agent = Agent::new(provider).system("test").tool(risky);
+    let result = agent.chat("try risky op").await.unwrap();
+    // Agent should receive the error string and try again
+    assert!(!result.is_empty());
+}
+
+#[tokio::test]
+async fn test_tool_receives_malformed_json() {
+    let provider = SeqProvider::new(vec![
+        LLMResponse {
+            message: AssistantMessage {
+                content: String::new(),
+                tool_calls: Some(vec![ToolCall {
+                    id: "call_1".into(),
+                    call_type: "function".into(),
+                    function: FunctionCall {
+                        name: "parse".into(),
+                        arguments: "not-valid-json".into(),
+                    },
+                }]),
+            },
+            finish_reason: FinishReason::ToolCalls,
+        },
+        text("recovered"),
+    ]);
+    let parse_tool = ToolDef::new("parse", "Parse JSON")
+        .build(|args: String| async move { format!("got: {}", args) });
+    let mut agent = Agent::new(provider).system("test").tool(parse_tool);
+    let result = agent.chat("parse bad json").await.unwrap();
+    assert_eq!(result, "recovered");
+}
+
+#[tokio::test]
+async fn test_multi_round_conversation() {
+    let provider = SeqProvider::new(vec![
+        text("Hello! How can I help?"),
+        text("Sure, let me look that up."),
+        text("Here's what I found: ..."),
+    ]);
+    let mut agent = Agent::new(provider).system("You are a helpful assistant.");
+    let r1 = agent.chat("Hi").await.unwrap();
+    assert!(r1.len() > 0);
+    let r2 = agent.chat("Can you help?").await.unwrap();
+    assert!(r2.len() > 0);
+    let r3 = agent.chat("Thanks").await.unwrap();
+    assert!(r3.len() > 0);
+    // All three rounds in history
+    let h = agent.history_ref().get_all();
+    let user_msgs: Vec<_> = h.iter().filter(|m| matches!(m.message, Message::User(_))).collect();
+    assert_eq!(user_msgs.len(), 3);
+}
+
+#[tokio::test]
+async fn test_stop_condition_never_requires_external_control() {
+    let responses: Vec<_> = (0..10).map(|i| text(&format!("msg{}", i))).collect();
+    let provider = SeqProvider::new(responses);
+    let mut agent = Agent::new(provider)
+        .system("test")
+        .stop_when(StopCondition::Never)
+        .max_iterations(5); // safety cap: 5
+
+    let result = agent.chat("loop").await.unwrap();
+    // Should stop via max_iterations (5), not Never
+    assert!(result.contains("msg"));
+    // Verify it didn't do 10 rounds
+    let h = agent.history_ref().get_all();
+    let assistant_count = h.iter().filter(|m| matches!(m.message, Message::Assistant(_))).count();
+    assert!(assistant_count <= 6); // 5 LLM calls + max_iterations fallback
+}
+
+#[tokio::test]
+async fn test_on_stuck_exact_boundary() {
+    // 3 identical calls → OnStuck { max_repeats: 3 } should fire on the 3rd
+    let responses: Vec<_> = (0..5).map(|_| tool_call("ping", r#"{"n":1}"#)).collect();
+    let provider = SeqProvider::new(responses);
+    let ping = ToolDef::new("ping", "Ping").build(|_args: String| async { "pong".to_string() });
+    let mut agent = Agent::new(provider)
+        .system("test")
+        .tool(ping)
+        .stop_when(StopCondition::OnStuck { max_repeats: 3 });
+
+    let result = agent.chat("ping loop").await;
+    assert!(result.is_ok());
+    let tool_msgs: Vec<_> = agent.history_ref().get_all().iter()
+        .filter(|m| matches!(m.message, Message::Tool(_)))
+        .collect();
+    assert!(tool_msgs.len() <= 4); // 3 calls then stuck stop (4th may trigger via AfterNTools-like path)
+}
+
+#[tokio::test]
+async fn test_empty_response_retry_limit() {
+    // 3 empty responses → max 2 retries → 3rd should stop
+    let provider = SeqProvider::new(vec![
+        LLMResponse { message: AssistantMessage { content: String::new(), tool_calls: None }, finish_reason: FinishReason::Stop },
+        LLMResponse { message: AssistantMessage { content: String::new(), tool_calls: None }, finish_reason: FinishReason::Stop },
+        text("finally something"),
+    ]);
+    let mut agent = Agent::new(provider).system("test");
+    let result = agent.chat("trigger empty").await.unwrap();
+    assert_eq!(result, "finally something");
+}
+
+#[tokio::test]
+async fn test_length_continuation() {
+    let provider = SeqProvider::new(vec![
+        LLMResponse { message: AssistantMessage { content: "part1".into(), tool_calls: None }, finish_reason: FinishReason::Length },
+        text("part2"),
+    ]);
+    let mut agent = Agent::new(provider).system("test");
+    let result = agent.chat("continue").await.unwrap();
+    assert_eq!(result, "part2");
+    let h = agent.history_ref().get_all();
+    // Should have a "continue" user message injected
+    assert!(h.iter().any(|m| matches!(&m.message, Message::User(um) if um.content == "continue")));
+}
+
+#[tokio::test]
+async fn test_tool_not_found_message_includes_available() {
+    let provider = SeqProvider::new(vec![
+        LLMResponse {
+            message: AssistantMessage {
+                content: String::new(),
+                tool_calls: Some(vec![ToolCall {
+                    id: "c1".into(), call_type: "function".into(),
+                    function: FunctionCall { name: "nonexistent".into(), arguments: "{}".into() },
+                }]),
+            },
+            finish_reason: FinishReason::ToolCalls,
+        },
+        text("ok"),
+    ]);
+    let real_tool = ToolDef::new("real_tool", "A real tool")
+        .build(|_args: String| async { "real".to_string() });
+    let mut agent = Agent::new(provider).system("test").tool(real_tool);
+    let result = agent.chat("test").await.unwrap();
+    assert_eq!(result, "ok");
+    let h = agent.history_ref().get_all();
+    assert!(h.iter().any(|m| {
+        matches!(&m.message, Message::Tool(tm) if tm.content.contains("Available"))
+    }));
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Stress tests
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+#[tokio::test]
+async fn test_many_tools_registered() {
+    let mut responses = vec![];
+    for i in 0..10 {
+        responses.push(tool_call(&format!("tool{}", i), &format!(r#"{{"n":{}}}"#, i)));
+    }
+    responses.push(text("all done"));
+
+    let provider = SeqProvider::new(responses);
+    let mut agent = Agent::new(provider).system("test");
+    for i in 0..10 {
+        let tool = ToolDef::new(&format!("tool{}", i), &format!("Tool number {}", i))
+            .build(move |_args: String| async move { format!("result{}", i) });
+        agent = agent.tool(tool);
+    }
+    let result = agent.chat("use all tools").await.unwrap();
+    assert_eq!(result, "all done");
+    assert_eq!(agent.tool_definitions().len(), 10);
+}
+
+#[tokio::test]
+async fn test_many_parallel_tool_calls() {
+    let calls: Vec<_> = (0..8).map(|i| ToolCall {
+        id: format!("c{}", i), call_type: "function".into(),
+        function: FunctionCall { name: "echo".into(), arguments: format!(r#"{{"n":{}}}"#, i) },
+    }).collect();
+
+    let provider = SeqProvider::new(vec![
+        LLMResponse {
+            message: AssistantMessage { content: String::new(), tool_calls: Some(calls) },
+            finish_reason: FinishReason::ToolCalls,
+        },
+        text("batch done"),
+    ]);
+    let echo = ToolDef::new("echo", "Echo").build(|args: String| async move { format!("echo:{}", args) });
+    let mut agent = Agent::new(provider).system("test").tool(echo);
+    let result = agent.chat("batch").await.unwrap();
+    assert_eq!(result, "batch done");
+    let tool_msgs: Vec<_> = agent.history_ref().get_all().iter()
+        .filter(|m| matches!(m.message, Message::Tool(_)))
+        .collect();
+    assert_eq!(tool_msgs.len(), 8);
+}
+
+#[tokio::test]
+async fn test_mixed_concurrency_safety() {
+    use motif::ConcurrencySafety;
+    use async_trait::async_trait;
+
+    struct SafeTool;
+    #[async_trait]
+    impl Tool for SafeTool {
+        async fn call(&self, args: String) -> String { format!("safe:{}", args) }
+        fn concurrency_safety(&self) -> ConcurrencySafety { ConcurrencySafety::ConcurrentSafe }
+    }
+    struct UnsafeTool;
+    #[async_trait]
+    impl motif::tool::Tool for UnsafeTool {
+        async fn call(&self, args: String) -> String { format!("unsafe:{}", args) }
+        fn concurrency_safety(&self) -> ConcurrencySafety { ConcurrencySafety::ConcurrentUnsafe }
+    }
+
+    let calls = vec![
+        ToolCall { id: "c1".into(), call_type: "function".into(), function: FunctionCall { name: "safe_op".into(), arguments: "{}".into() }},
+        ToolCall { id: "c2".into(), call_type: "function".into(), function: FunctionCall { name: "unsafe_op".into(), arguments: "{}".into() }},
+        ToolCall { id: "c3".into(), call_type: "function".into(), function: FunctionCall { name: "safe_op".into(), arguments: r#"{"x":2}"#.into() }},
+    ];
+
+    let provider = SeqProvider::new(vec![
+        LLMResponse { message: AssistantMessage { content: String::new(), tool_calls: Some(calls) }, finish_reason: FinishReason::ToolCalls },
+        text("mixed done"),
+    ]);
+
+    let mut exec = motif::tool::Executor::parallel();
+    exec.register("safe_op".into(), Arc::new(SafeTool));
+    exec.register("unsafe_op".into(), Arc::new(UnsafeTool));
+
+    let mut agent = Agent::new(provider).system("test").executor(exec);
+    let result = agent.chat("test mix").await.unwrap();
+    assert_eq!(result, "mixed done");
+}
+
+#[tokio::test]
+async fn test_agent_reuse_same_history() {
+    let provider = SeqProvider::new(vec![
+        text("Hello!"),
+        text("How are you?"),
+    ]);
+    let mut agent = Agent::new(provider).system("test");
+    let r1 = agent.chat("Hi").await.unwrap();
+    assert_eq!(r1, "Hello!");
+    let r2 = agent.chat("And you?").await.unwrap();
+    assert_eq!(r2, "How are you?");
+    // Same agent, same history — 2 user + 2 assistant = 4 messages
+    assert_eq!(agent.history_ref().get_all().len(), 4);
+}
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Expanded real API tests
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+fn live_provider() -> OpenAIProvider {
+    let api_key = std::env::var("MOTIF_API_KEY").expect("MOTIF_API_KEY not set");
+    let base_url = std::env::var("MOTIF_BASE_URL").unwrap_or_else(|_| "https://api.deepseek.com/v1".into());
+    let model = std::env::var("MOTIF_MODEL").unwrap_or_else(|_| "deepseek-chat".into());
+    OpenAIProvider::new(&base_url, &api_key, &model)
+}
+
+#[tokio::test]
+#[ignore]
+async fn test_live_multi_tool_conversation() {
+    let weather = ToolDef::new("get_weather", "Get weather for a city")
+        .param::<String>("city", "City name")
+        .build(|args: String| {
+            let v: serde_json::Value = serde_json::from_str(&args).unwrap_or_default();
+            let city = v["city"].as_str().unwrap_or("unknown").to_string();
+            async move { format!("Weather in {}: 22°C, sunny", city) }
+        });
+
+    let time = ToolDef::new("get_time", "Get current time for a timezone")
+        .param::<String>("timezone", "Timezone like Asia/Shanghai")
+        .build(|args: String| {
+            let v: serde_json::Value = serde_json::from_str(&args).unwrap_or_default();
+            let tz = v["timezone"].as_str().unwrap_or("UTC").to_string();
+            async move { format!("Time in {}: 14:30", tz) }
+        });
+
+    let mut agent = Agent::new(live_provider())
+        .system("你是一个助手。用工具回答问题。用中文回复。")
+        .tool(weather)
+        .tool(time);
+
+    let result = agent.chat("北京的天气和上海的时间").await.unwrap();
+    println!("LIVE MULTI-TOOL: {}", result);
+    assert!(!result.is_empty());
+}
+
+#[tokio::test]
+#[ignore]
+async fn test_live_long_output() {
+    let mut agent = Agent::new(live_provider())
+        .system("You are a storyteller. Tell a detailed story when asked.")
+        .max_iterations(50);
+
+    let result = agent.chat("讲一个100字的短故事").await.unwrap();
+    let preview: String = result.chars().take(100).collect();
+    println!("LIVE LONG OUTPUT ({} chars): {}", result.len(), preview);
+    assert!(!result.is_empty(), "Expected non-empty output");
+}
+
+#[tokio::test]
+#[ignore]
+async fn test_live_error_recovery_tool() {
+    let search = ToolDef::new("search", "Search the web")
+        .param::<String>("query", "Search query")
+        .build(|args: String| {
+            let v: serde_json::Value = serde_json::from_str(&args).unwrap_or_default();
+            let q = v["query"].as_str().unwrap_or("").to_string();
+            async move {
+                if q.is_empty() { "Error: empty query".to_string() }
+                else { format!("Results for '{}': 3 pages found", q) }
+            }
+        });
+
+    let mut agent = Agent::new(live_provider())
+        .system("你是一个搜索助手。用search工具。如果工具返回错误，尝试修改查询重试。用中文回复。")
+        .tool(search);
+
+    let result = agent.chat("搜索 Rust agent framework").await.unwrap();
+    println!("LIVE RECOVERY: {}", result);
+    assert!(!result.is_empty());
+}
+
+#[tokio::test]
+#[ignore]
+async fn test_live_many_rounds() {
+    let mut agent = Agent::new(live_provider())
+        .system("You are a concise assistant. Reply in ONE sentence.")
+        .max_iterations(30);
+
+    let r1 = agent.chat("What is Rust?").await.unwrap();
+    println!("LIVE ROUND 1: {}", &r1[..r1.len().min(80)]);
+    assert!(!r1.is_empty());
+
+    let r2 = agent.chat("What about memory safety?").await.unwrap();
+    println!("LIVE ROUND 2: {}", &r2[..r2.len().min(80)]);
+    assert!(!r2.is_empty());
+
+    let r3 = agent.chat("Summarize our conversation").await.unwrap();
+    println!("LIVE ROUND 3: {}", &r3[..r3.len().min(80)]);
+    assert!(!r3.is_empty());
+
+    // All 3 rounds accumulated
+    let user_count = agent.history_ref().get_all().iter()
+        .filter(|m| matches!(m.message, Message::User(_)))
+        .count();
+    assert!(user_count >= 3, "Expected >=3 user messages, got {}", user_count);
+}
+
+#[tokio::test]
+#[ignore]
+async fn test_live_system_prompt_obedience() {
+    let mut agent = Agent::new(live_provider())
+        .system("You are a calculator that ONLY responds with numbers. Never use words. Never explain.");
+
+    let result = agent.chat("1 + 1 = ?").await.unwrap();
+    println!("LIVE OBEDIENCE: {}", result);
+    assert!(!result.is_empty());
+    // Should be mostly numeric
+    let has_digit = result.chars().any(|c| c.is_ascii_digit());
+    assert!(has_digit, "Expected numeric response, got: {}", result);
+}
+
+#[tokio::test]
+#[ignore]
+async fn test_live_custom_temperature() {
+    let api_key = std::env::var("MOTIF_API_KEY").expect("MOTIF_API_KEY not set");
+    let base_url = std::env::var("MOTIF_BASE_URL").unwrap_or_else(|_| "https://api.deepseek.com/v1".into());
+    let provider = OpenAIProvider::new(&base_url, &api_key, "deepseek-chat")
+        .with_body("temperature", 0.0);
+
+    let mut agent = Agent::new(provider)
+        .system("Reply in exactly 5 words.");
+
+    let r1 = agent.chat("What is Rust?").await.unwrap();
+    let r2 = agent.chat("What is Rust?").await.unwrap();
+    println!("LIVE TEMP=0: r1={} | r2={}", &r1[..r1.len().min(60)], &r2[..r2.len().min(60)]);
+    // With temp=0, responses should be deterministic or nearly identical
+    assert!(!r1.is_empty());
+    assert!(!r2.is_empty());
+}
+
+#[tokio::test]
+#[ignore]
+async fn test_live_name_attribute() {
+    #[motif::tool(name = "web_lookup")]
+    async fn search_web(
+        #[serde(rename = "searchTerm")]
+        query: String,
+    ) -> String {
+        format!("Found: {}", query)
+    }
+
+    let mut agent = Agent::new(live_provider())
+        .system("You have a web_lookup tool. Use it. Reply in Chinese.")
+        .tool_fn(search_web);
+
+    let result = agent.chat("用web_lookup查找Rust教程").await.unwrap();
+    println!("LIVE NAME ATTR: {}", result);
+    assert!(!result.is_empty());
+}
