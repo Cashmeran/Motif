@@ -301,10 +301,11 @@ async fn test_live_tool_use() {
         .unwrap_or_else(|_| "https://api.deepseek.com/v1".into());
     let model = std::env::var("MOTIF_MODEL").unwrap_or_else(|_| "deepseek-chat".into());
 
-    let calculator = ToolDef::new("calculator", "计算数学表达式，参数expression是算式")
+    let calculator = ToolDef::new("calculator", "计算数学表达式")
+        .param::<String>("expression", "算式，如 3*14")
         .build(|args: String| {
-            let v: serde_json::Value = serde_json::from_str(&args).unwrap();
-            let expr = v["expression"].as_str().unwrap().to_string();
+            let v: serde_json::Value = serde_json::from_str(&args).unwrap_or_default();
+            let expr = v["expression"].as_str().unwrap_or("unknown").to_string();
             async move { format!("计算结果({}) = 42 (mock)", expr) }
         });
 
