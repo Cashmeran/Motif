@@ -7,10 +7,25 @@ use crate::types::{Parameters, ToolCall, ToolDefinition, ToolMessage, ToolResult
 
 // --- Tool trait ---
 
+/// Whether a tool is safe to execute concurrently with other tools.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConcurrencySafety {
+    /// Safe to run in parallel with other tools (read-only operations).
+    ConcurrentSafe,
+    /// Must run sequentially (write operations, stateful tools).
+    ConcurrentUnsafe,
+}
+
 /// A callable tool. Accepts JSON string arguments, returns a string result.
 #[async_trait]
 pub trait Tool: Send + Sync {
     async fn call(&self, args: String) -> String;
+
+    /// Whether this tool is safe to run concurrently with others.
+    /// Default: ConcurrentSafe.
+    fn concurrency_safety(&self) -> ConcurrencySafety {
+        ConcurrencySafety::ConcurrentSafe
+    }
 }
 
 // --- FunctionTool: wraps an async fn ---
@@ -80,9 +95,23 @@ impl ToolExecutor for ParallelExecutor {
     }
 
     async fn execute(&self, calls: Vec<ToolCall>) -> Vec<ToolResult> {
-        let futures: Vec<_> = calls
-            .into_iter()
-            .map(|call| {
+        if calls.is_empty() {
+            return vec![];
+        }
+
+        // Partition: concurrent-safe tools run in parallel, unsafe ones sequentially
+        let (safe, unsafe_calls): (Vec<_>, Vec<_>) = calls.into_iter().partition(|call| {
+            self.tools.get(&call.function.name)
+                .map(|t| t.concurrency_safety() == ConcurrencySafety::ConcurrentSafe)
+                .unwrap_or(true)
+        });
+
+        let mut results: Vec<ToolResult> = vec![];
+
+        // Run safe tools in parallel
+        if !safe.is_empty() {
+            use futures::future::join_all;
+            let batch: Vec<_> = join_all(safe.into_iter().map(|call| {
                 let tool = self.tools.get(&call.function.name).cloned();
                 async move {
                     let start = std::time::SystemTime::now();
@@ -92,20 +121,31 @@ impl ToolExecutor for ParallelExecutor {
                     };
                     let elapsed = start.elapsed().unwrap_or_default();
                     ToolResult {
-                        tool_message: ToolMessage {
-                            tool_call_id: call.id,
-                            content,
-                        },
+                        tool_message: ToolMessage { tool_call_id: call.id, content },
                         timestamp: start + elapsed,
                         elapsed,
                     }
                 }
-            })
-            .collect();
+            })).await;
+            results = batch;
+        }
 
-        // Execute in parallel
-        use futures::future::join_all;
-        join_all(futures).await
+        // Run unsafe tools sequentially
+        for call in unsafe_calls {
+            let start = std::time::SystemTime::now();
+            let content = match self.tools.get(&call.function.name) {
+                Some(t) => t.call(call.function.arguments).await,
+                None => format!("Tool '{}' not found", call.function.name),
+            };
+            let elapsed = start.elapsed().unwrap_or_default();
+            results.push(ToolResult {
+                tool_message: ToolMessage { tool_call_id: call.id, content },
+                timestamp: start + elapsed,
+                elapsed,
+            });
+        }
+
+        results
     }
 
     fn has(&self, name: &str) -> bool {

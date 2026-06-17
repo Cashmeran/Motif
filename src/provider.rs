@@ -29,11 +29,20 @@ pub struct OpenAIProvider {
 impl OpenAIProvider {
     pub fn new(base_url: impl Into<String>, api_key: impl Into<String>, model: impl Into<String>) -> Self {
         Self {
-            client: Client::new(),
+            client: Client::builder()
+                .timeout(std::time::Duration::from_secs(300))
+                .build()
+                .expect("Failed to build HTTP client"),
             base_url: base_url.into(),
             api_key: api_key.into(),
             model: model.into(),
         }
+    }
+
+    /// Configure a custom HTTP client (e.g., with proxy, custom timeouts).
+    pub fn with_client(mut self, client: Client) -> Self {
+        self.client = client;
+        self
     }
 }
 
@@ -74,7 +83,13 @@ impl LLMProvider for OpenAIProvider {
         }
 
         let json: Value = response.json().await?;
-        let choice = &json["choices"][0];
+        let choice = json["choices"]
+            .as_array()
+            .and_then(|a| a.first())
+            .ok_or_else(|| Error::ApiError {
+                status: status.as_u16(),
+                body: format!("No choices in response: {}", json),
+            })?;
         let msg = &choice["message"];
 
         let content = msg["content"].as_str().unwrap_or("").to_string();

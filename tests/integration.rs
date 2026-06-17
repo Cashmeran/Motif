@@ -1,6 +1,6 @@
 use motif::*;
 use async_trait::async_trait;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 // --- Mock provider that returns a sequence of responses ---
 struct SeqProvider {
@@ -226,7 +226,7 @@ async fn test_custom_stop_condition() {
 
     let mut agent = Agent::new(provider)
         .system("test")
-        .stop_when(StopCondition::Custom(Box::new(|resp, _history| {
+        .stop_when(StopCondition::Custom(Arc::new(|resp, _history| {
             resp.message.content.len() > 10
         })));
 

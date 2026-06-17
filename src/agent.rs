@@ -23,7 +23,7 @@ pub enum StopCondition {
     /// Never stop automatically — caller controls the loop via `step()`.
     Never,
     /// Custom predicate: receives LLM response and full history.
-    Custom(Box<dyn Fn(&LLMResponse, &[TimedMessage]) -> bool + Send + Sync>),
+    Custom(Arc<dyn Fn(&LLMResponse, &[TimedMessage]) -> bool + Send + Sync>),
 }
 
 impl Default for StopCondition {
@@ -43,11 +43,11 @@ impl StopCondition {
                 tool_count >= *n
             }
             StopCondition::OnStuck { max_repeats } => {
-                if recent_calls.len() < *max_repeats {
+                let n = (*max_repeats).max(2); // minimum 2, single call can't be "stuck"
+                if recent_calls.len() < n {
                     return false;
                 }
-                // Check last N calls are all identical
-                let last = &recent_calls[recent_calls.len() - *max_repeats..];
+                let last = &recent_calls[recent_calls.len() - n..];
                 last.windows(2).all(|w| w[0] == w[1])
             }
             StopCondition::Never => false,
@@ -70,6 +70,7 @@ pub struct Agent {
     tool_definitions: Vec<ToolDefinition>,
     stop_condition: StopCondition,
     recent_tool_calls: Vec<String>, // tracks tool_name+args for OnStuck
+    max_iterations: usize,
 }
 
 impl Agent {
@@ -85,7 +86,16 @@ impl Agent {
             tool_definitions: vec![],
             stop_condition: StopCondition::default(),
             recent_tool_calls: vec![],
+            max_iterations: 100,
         }
+    }
+
+    /// Set the maximum number of LLM calls before the agent stops.
+    /// Defaults to 100. Set to 0 for no limit (use with caution —
+    /// combine with OnStuck or Never only when the caller controls the loop).
+    pub fn max_iterations(mut self, n: usize) -> Self {
+        self.max_iterations = n;
+        self
     }
 
     // --- Builder methods ---
@@ -126,13 +136,14 @@ impl Agent {
     pub fn external_tools(
         mut self,
         defs: Vec<ToolDefinition>,
-        handler: impl Fn(String, String) -> String + Clone + Send + Sync + 'static,
+        handler: impl Fn(String, String) -> String + Send + Sync + 'static,
     ) -> Self {
         use crate::tool::FunctionTool;
+        let shared = Arc::new(handler);
         for def in &defs {
             let name = def.function.name.clone();
-            let handler = Arc::new(handler.clone());
-            let def_name = name.clone(); // owned copy for the closure
+            let handler = shared.clone();
+            let def_name = name.clone();
             self.executor.register(
                 name,
                 Arc::new(FunctionTool::new(move |args: String| {
@@ -267,7 +278,29 @@ impl Agent {
             }
         }
 
+        let mut iterations = 0;
         loop {
+            if self.max_iterations > 0 && iterations >= self.max_iterations {
+                let drained: Vec<_> = self.history.get_all().iter()
+                    .filter(|m| matches!(m.message, Message::Assistant(_)))
+                    .collect();
+                let fallback = drained.last()
+                    .and_then(|tm| {
+                        if let Message::Assistant(ref a) = tm.message {
+                            Some(a.content.clone())
+                        } else { None }
+                    })
+                    .unwrap_or_else(|| "Max iterations reached".to_string());
+                run_ctx.final_content = Some(fallback.clone());
+                for hook in &self.hooks {
+                    if let Err(e) = hook.after_run(&mut run_ctx).await {
+                        tracing::warn!("Hook.after_run error: {}", e);
+                    }
+                }
+                return Ok(fallback);
+            }
+            iterations += 1;
+
             match self.step().await {
                 Ok(Some(content)) => {
                     let mut finalized = content;
@@ -284,7 +317,7 @@ impl Agent {
                 }
                 Ok(None) => continue,
                 Err(e) => {
-                    run_ctx.error = Some(Error::Custom(e.to_string()));
+                    run_ctx.error = Some(e.clone());
                     for hook in &self.hooks {
                         if let Err(e2) = hook.after_run(&mut run_ctx).await {
                             tracing::warn!("Hook.after_run error: {}", e2);
