@@ -966,3 +966,24 @@ async fn test_live_name_attribute() {
     println!("LIVE NAME ATTR: {}", result);
     assert!(!result.is_empty());
 }
+
+// --- BoundedHistory tests ---
+
+#[tokio::test]
+async fn test_bounded_history_with_agent() {
+    let provider = SeqProvider::new(vec![text("Hello!"), text("World"), text("Again")]);
+    let mut agent = Agent::new(provider).history(BoundedHistory::new(4));
+    agent.chat("hi").await.unwrap();
+    agent.chat("again").await.unwrap();
+    assert!(agent.history_ref().get_all().len() <= 4);
+}
+
+#[tokio::test]
+async fn test_bounded_history_preserves_system() {
+    let provider = SeqProvider::new(vec![text("ok")]);
+    let mut agent = Agent::new(provider).history(BoundedHistory::new(3));
+    agent.chat("test").await.unwrap();
+    let msgs = agent.history_ref().get_all();
+    assert!(!msgs.is_empty());
+    assert!(msgs.len() <= 3);
+}
