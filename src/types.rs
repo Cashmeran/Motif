@@ -110,6 +110,14 @@ pub enum FinishReason {
 pub struct LLMResponse {
     pub message: AssistantMessage,
     pub finish_reason: FinishReason,
+    pub usage: Option<TokenUsage>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, Default)]
+pub struct TokenUsage {
+    pub prompt_tokens: u32,
+    pub completion_tokens: u32,
+    pub total_tokens: u32,
 }
 
 // --- Streaming ---

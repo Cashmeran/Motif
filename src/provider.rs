@@ -97,6 +97,12 @@ impl OpenAIProvider {
             let json: Value = response.json().await?;
             let choice = json["choices"].as_array().and_then(|a| a.first()).ok_or_else(|| Error::ApiError { status: 200, body: format!("No choices: {}", json) })?;
             let msg = &choice["message"];
+            let usage = json.get("usage").map(|u| crate::types::TokenUsage {
+                prompt_tokens: u["prompt_tokens"].as_u64().unwrap_or(0) as u32,
+                completion_tokens: u["completion_tokens"].as_u64().unwrap_or(0) as u32,
+                total_tokens: u["total_tokens"].as_u64().unwrap_or(0) as u32,
+            });
+
             return Ok(LLMResponse {
                 message: crate::types::AssistantMessage {
                     content: msg["content"].as_str().unwrap_or("").to_string(),
@@ -119,6 +125,7 @@ impl OpenAIProvider {
                     Some(o) => crate::types::FinishReason::Custom(o.to_string()),
                     None => crate::types::FinishReason::Stop,
                 },
+                usage,
             });
         }
         Err(last_err.unwrap_or_else(|| Error::Custom("max retries exhausted".into())))

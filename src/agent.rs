@@ -76,6 +76,7 @@ pub struct Agent {
     length_continues: usize,
     max_length_continues: usize,
     step_count: usize,
+    total_tokens: u64,
 }
 
 impl Agent {
@@ -97,6 +98,7 @@ impl Agent {
             length_continues: 0,
             max_length_continues: 3,
             step_count: 0,
+            total_tokens: 0,
         }
     }
 
@@ -255,6 +257,10 @@ impl Agent {
             .provider
             .call(&turn_messages, &self.tool_definitions)
             .await?;
+
+        if let Some(ref usage) = response.usage {
+            self.total_tokens += usage.total_tokens as u64;
+        }
 
         let elapsed = std::time::Duration::ZERO;
 
@@ -429,6 +435,9 @@ impl Agent {
         &self.tool_definitions
     }
 
+    /// Total tokens consumed across all LLM calls in this session.
+    pub fn total_tokens_used(&self) -> u64 { self.total_tokens }
+
     /// Access the history.
     pub fn history_ref(&self) -> &dyn History {
         self.history.as_ref()
@@ -478,6 +487,7 @@ mod tests {
                 tool_calls: None,
             },
             finish_reason: FinishReason::Stop,
+            usage: None,
         }
     }
 
@@ -495,6 +505,7 @@ mod tests {
                 }]),
             },
             finish_reason: FinishReason::ToolCalls,
+            usage: None,
         }
     }
 

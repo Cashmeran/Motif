@@ -39,6 +39,7 @@ fn text(content: &str) -> LLMResponse {
             tool_calls: None,
         },
         finish_reason: FinishReason::Stop,
+            usage: None,
     }
 }
 
@@ -56,6 +57,7 @@ fn tool_call(name: &str, args: &str) -> LLMResponse {
             }]),
         },
         finish_reason: FinishReason::ToolCalls,
+            usage: None,
     }
 }
 
@@ -121,6 +123,7 @@ async fn test_multiple_tools_in_one_turn() {
                 ]),
             },
             finish_reason: FinishReason::ToolCalls,
+            usage: None,
         },
         text("Done with both"),
     ]);
@@ -278,6 +281,22 @@ async fn test_prompt_builder_extension() {
 
 #[tokio::test]
 #[ignore]
+async fn test_live_token_counting() {
+    let api_key = std::env::var("MOTIF_API_KEY").expect("MOTIF_API_KEY not set");
+    let base_url = std::env::var("MOTIF_BASE_URL").unwrap_or_else(|_| "https://api.deepseek.com/v1".into());
+    let model = std::env::var("MOTIF_MODEL").unwrap_or_else(|_| "deepseek-chat".into());
+    let provider = OpenAIProvider::new(&base_url, &api_key, &model);
+    let mut agent = Agent::new(provider).system("test");
+
+    let before = agent.total_tokens_used();
+    let _ = agent.chat("Hello").await.unwrap();
+    let after = agent.total_tokens_used();
+    println!("LIVE TOKENS: before={}, after={}, delta={}", before, after, after - before);
+    assert!(after > before, "Token count should increase after an API call");
+}
+
+#[tokio::test]
+#[ignore]
 async fn test_live_simple_chat() {
     let api_key = std::env::var("MOTIF_API_KEY").expect("MOTIF_API_KEY not set");
     let base_url = std::env::var("MOTIF_BASE_URL")
@@ -425,6 +444,7 @@ async fn test_tool_macro_registration() {
                 }]),
             },
             finish_reason: FinishReason::ToolCalls,
+            usage: None,
         },
         text("Greeting sent!"),
     ]);
@@ -480,6 +500,7 @@ async fn test_tool_impl_block() {
                 }]),
             },
             finish_reason: FinishReason::ToolCalls,
+            usage: None,
         },
         text("Counter incremented!"),
     ]);
@@ -567,6 +588,7 @@ async fn test_tool_receives_malformed_json() {
                 }]),
             },
             finish_reason: FinishReason::ToolCalls,
+            usage: None,
         },
         text("recovered"),
     ]);
@@ -638,8 +660,8 @@ async fn test_on_stuck_exact_boundary() {
 async fn test_empty_response_retry_limit() {
     // 3 empty responses → max 2 retries → 3rd should stop
     let provider = SeqProvider::new(vec![
-        LLMResponse { message: AssistantMessage { content: String::new(), tool_calls: None }, finish_reason: FinishReason::Stop },
-        LLMResponse { message: AssistantMessage { content: String::new(), tool_calls: None }, finish_reason: FinishReason::Stop },
+        LLMResponse { message: AssistantMessage { content: String::new(), tool_calls: None }, finish_reason: FinishReason::Stop, usage: None },
+        LLMResponse { message: AssistantMessage { content: String::new(), tool_calls: None }, finish_reason: FinishReason::Stop, usage: None },
         text("finally something"),
     ]);
     let mut agent = Agent::new(provider).system("test");
@@ -650,7 +672,7 @@ async fn test_empty_response_retry_limit() {
 #[tokio::test]
 async fn test_length_continuation() {
     let provider = SeqProvider::new(vec![
-        LLMResponse { message: AssistantMessage { content: "part1".into(), tool_calls: None }, finish_reason: FinishReason::Length },
+        LLMResponse { message: AssistantMessage { content: "part1".into(), tool_calls: None }, finish_reason: FinishReason::Length, usage: None },
         text("part2"),
     ]);
     let mut agent = Agent::new(provider).system("test");
@@ -673,6 +695,7 @@ async fn test_tool_not_found_message_includes_available() {
                 }]),
             },
             finish_reason: FinishReason::ToolCalls,
+            usage: None,
         },
         text("ok"),
     ]);
@@ -722,6 +745,7 @@ async fn test_many_parallel_tool_calls() {
         LLMResponse {
             message: AssistantMessage { content: String::new(), tool_calls: Some(calls) },
             finish_reason: FinishReason::ToolCalls,
+            usage: None,
         },
         text("batch done"),
     ]);
@@ -760,7 +784,7 @@ async fn test_mixed_concurrency_safety() {
     ];
 
     let provider = SeqProvider::new(vec![
-        LLMResponse { message: AssistantMessage { content: String::new(), tool_calls: Some(calls) }, finish_reason: FinishReason::ToolCalls },
+        LLMResponse { message: AssistantMessage { content: String::new(), tool_calls: Some(calls) }, finish_reason: FinishReason::ToolCalls, usage: None },
         text("mixed done"),
     ]);
 
