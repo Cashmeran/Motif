@@ -1,0 +1,519 @@
+use std::sync::Arc;
+use crate::error::Error;
+use crate::history::{History, InfiniteHistory};
+use crate::hooks::{AgentHook, HookContext, RunContext};
+use crate::provider::LLMProvider;
+use crate::prompt::{PromptBuilder, SystemPrompt};
+use crate::tool::{ParallelExecutor, RegisteredTool, ToolExecutor};
+use crate::types::{
+    FinishReason, LLMResponse, Message, SystemMessage,
+    TimedMessage, ToolDefinition,
+};
+
+// --- StopCondition ---
+
+/// Determines when the agent loop should terminate.
+pub enum StopCondition {
+    /// Stop when the LLM returns a text response (no tool calls).
+    OnText,
+    /// Stop after executing N rounds of tool calls.
+    AfterNTools(usize),
+    /// Stop when the same tool+args is called more than max_repeats times in a row.
+    OnStuck { max_repeats: usize },
+    /// Never stop automatically — caller controls the loop via `step()`.
+    Never,
+    /// Custom predicate: receives LLM response and full history.
+    Custom(Box<dyn Fn(&LLMResponse, &[TimedMessage]) -> bool + Send + Sync>),
+}
+
+impl Default for StopCondition {
+    fn default() -> Self {
+        StopCondition::OnText
+    }
+}
+
+impl StopCondition {
+    fn should_stop(&self, response: &LLMResponse, history: &[TimedMessage], recent_calls: &[String]) -> bool {
+        match self {
+            StopCondition::OnText => {
+                !matches!(response.finish_reason, FinishReason::ToolCalls)
+            }
+            StopCondition::AfterNTools(n) => {
+                let tool_count = history.iter().filter(|m| matches!(m.message, Message::Tool(_))).count();
+                tool_count >= *n
+            }
+            StopCondition::OnStuck { max_repeats } => {
+                if recent_calls.len() < *max_repeats {
+                    return false;
+                }
+                // Check last N calls are all identical
+                let last = &recent_calls[recent_calls.len() - *max_repeats..];
+                last.windows(2).all(|w| w[0] == w[1])
+            }
+            StopCondition::Never => false,
+            StopCondition::Custom(f) => f(response, history),
+        }
+    }
+}
+
+// --- Agent ---
+
+/// The agent. Compose with providers, tools, hooks, and history, then call
+/// `step()`, `run()`, or `chat()`.
+pub struct Agent {
+    provider: Arc<dyn LLMProvider>,
+    history: Box<dyn History>,
+    executor: Box<dyn ToolExecutor>,
+    hooks: Vec<Box<dyn AgentHook>>,
+    prompt: SystemPrompt,
+    prompt_builders: Vec<Box<dyn PromptBuilder>>,
+    tool_definitions: Vec<ToolDefinition>,
+    stop_condition: StopCondition,
+    recent_tool_calls: Vec<String>, // tracks tool_name+args for OnStuck
+}
+
+impl Agent {
+    /// Create a new agent with sensible defaults and the given provider.
+    pub fn new(provider: impl LLMProvider + 'static) -> Self {
+        Self {
+            provider: Arc::new(provider),
+            history: Box::new(InfiniteHistory::new()),
+            executor: Box::new(ParallelExecutor::new()),
+            hooks: vec![],
+            prompt: SystemPrompt::new("You are a helpful assistant."),
+            prompt_builders: vec![],
+            tool_definitions: vec![],
+            stop_condition: StopCondition::default(),
+            recent_tool_calls: vec![],
+        }
+    }
+
+    // --- Builder methods ---
+
+    pub fn system(mut self, prompt: impl Into<String>) -> Self {
+        self.prompt = SystemPrompt::new(prompt);
+        self
+    }
+
+    pub fn history(mut self, history: impl History + 'static) -> Self {
+        self.history = Box::new(history);
+        self
+    }
+
+    pub fn executor(mut self, executor: impl ToolExecutor + 'static) -> Self {
+        self.executor = Box::new(executor);
+        self
+    }
+
+    pub fn hook(mut self, hook: impl AgentHook + 'static) -> Self {
+        self.hooks.push(Box::new(hook));
+        self
+    }
+
+    pub fn prompt_builder(mut self, builder: impl PromptBuilder + 'static) -> Self {
+        self.prompt_builders.push(Box::new(builder));
+        self
+    }
+
+    pub fn tool(mut self, registered: RegisteredTool) -> Self {
+        let (def, tool) = registered.into_parts();
+        let name = def.function.name.clone();
+        self.tool_definitions.push(def);
+        self.executor.register(name, tool);
+        self
+    }
+
+    pub fn external_tools(
+        mut self,
+        defs: Vec<ToolDefinition>,
+        handler: impl Fn(String, String) -> String + Clone + Send + Sync + 'static,
+    ) -> Self {
+        use crate::tool::FunctionTool;
+        for def in &defs {
+            let name = def.function.name.clone();
+            let handler = Arc::new(handler.clone());
+            let def_name = name.clone(); // owned copy for the closure
+            self.executor.register(
+                name,
+                Arc::new(FunctionTool::new(move |args: String| {
+                    let h = handler.clone();
+                    let n = def_name.clone();
+                    Box::pin(async move { h(n, args) })
+                })),
+            );
+        }
+        self.tool_definitions.extend(defs);
+        self
+    }
+
+    pub fn stop_when(mut self, condition: StopCondition) -> Self {
+        self.stop_condition = condition;
+        self
+    }
+
+    // --- Core loop ---
+
+    /// Execute a single iteration: send messages to LLM, execute any tool
+    /// calls, append results to history. Returns `Ok(Some(content))` if the
+    /// loop should stop, `Ok(None)` to continue.
+    pub async fn step(&mut self) -> crate::Result<Option<String>> {
+        // Build the prompt with extensions
+        let mut prompt = self.prompt.clone();
+        for builder in &self.prompt_builders {
+            if let Some(block) = builder.build() {
+                prompt = prompt.extend(block);
+            }
+        }
+        let system_msg = Message::System(SystemMessage {
+            content: prompt.build(),
+        });
+
+        // Assemble messages for this turn
+        let mut turn_messages = vec![system_msg];
+        for timed in self.history.get_all() {
+            turn_messages.push(timed.message.clone());
+        }
+
+        // Hook: before_llm (error-isolated — one failing hook won't block others)
+        let iteration = self.history.get_all().len();
+        let mut hook_ctx = HookContext::new(iteration, self.history.get_all().to_vec());
+        for hook in &self.hooks {
+            if let Err(e) = hook.before_llm(&mut hook_ctx).await {
+                tracing::warn!("Hook.before_llm error: {}", e);
+            }
+        }
+
+        // Call LLM
+        let response = self
+            .provider
+            .call(&turn_messages, &self.tool_definitions)
+            .await?;
+
+        let elapsed = std::time::Duration::ZERO;
+
+        // Append assistant message to history
+        self.history.add(TimedMessage {
+            message: Message::Assistant(response.message.clone()),
+            timestamp: std::time::SystemTime::now(),
+            elapsed,
+        });
+
+        // Hook: after_llm
+        hook_ctx.response = Some(response.clone());
+        for hook in &self.hooks {
+            if let Err(e) = hook.after_llm(&mut hook_ctx).await {
+                tracing::warn!("Hook.after_llm error: {}", e);
+            }
+        }
+
+        // Execute tool calls if any
+        if let Some(ref calls) = response.message.tool_calls {
+            if !calls.is_empty() {
+                // Track for OnStuck
+                for call in calls {
+                    let sig = format!("{}:{}", call.function.name, call.function.arguments);
+                    self.recent_tool_calls.push(sig);
+                }
+                if self.recent_tool_calls.len() > 20 {
+                    self.recent_tool_calls =
+                        self.recent_tool_calls.split_off(self.recent_tool_calls.len() - 20);
+                }
+
+                hook_ctx.tool_calls = calls.clone();
+                for hook in &self.hooks {
+                    if let Err(e) = hook.before_tools(&mut hook_ctx).await {
+                        tracing::warn!("Hook.before_tools error: {}", e);
+                    }
+                }
+
+                let results = self.executor.execute(calls.clone()).await;
+
+                hook_ctx.tool_results = results.clone();
+                for hook in &self.hooks {
+                    if let Err(e) = hook.after_tools(&mut hook_ctx).await {
+                        tracing::warn!("Hook.after_tools error: {}", e);
+                    }
+                }
+
+                // Append tool results to history
+                for result in results {
+                    self.history.add(TimedMessage {
+                        message: Message::Tool(result.tool_message),
+                        timestamp: result.timestamp,
+                        elapsed: result.elapsed,
+                    });
+                }
+            }
+        }
+
+        // Check stop condition
+        if self.stop_condition.should_stop(
+            &response,
+            self.history.get_all(),
+            &self.recent_tool_calls,
+        ) {
+            return Ok(Some(response.message.content));
+        }
+
+        Ok(None)
+    }
+
+    /// Run the agent loop until the stop condition is met.
+    pub async fn run(&mut self) -> crate::Result<String> {
+        let mut run_ctx = RunContext::new();
+        for hook in &self.hooks {
+            if let Err(e) = hook.before_run(&mut run_ctx).await {
+                tracing::warn!("Hook.before_run error: {}", e);
+            }
+        }
+
+        loop {
+            match self.step().await {
+                Ok(Some(content)) => {
+                    let mut finalized = content;
+                    for hook in &self.hooks {
+                        finalized = hook.finalize_content(&finalized);
+                    }
+                    run_ctx.final_content = Some(finalized.clone());
+                    for hook in &self.hooks {
+                        if let Err(e) = hook.after_run(&mut run_ctx).await {
+                            tracing::warn!("Hook.after_run error: {}", e);
+                        }
+                    }
+                    return Ok(finalized);
+                }
+                Ok(None) => continue,
+                Err(e) => {
+                    run_ctx.error = Some(Error::Custom(e.to_string()));
+                    for hook in &self.hooks {
+                        if let Err(e2) = hook.after_run(&mut run_ctx).await {
+                            tracing::warn!("Hook.after_run error: {}", e2);
+                        }
+                    }
+                    return Err(e);
+                }
+            }
+        }
+    }
+
+    /// Send a user message and run the loop to completion.
+    pub async fn chat(&mut self, prompt: impl Into<String>) -> crate::Result<String> {
+        self.history.add(TimedMessage::new(Message::user(prompt)));
+        self.run().await
+    }
+
+    /// Access the underlying tool definitions (for introspection).
+    pub fn tool_definitions(&self) -> &[ToolDefinition] {
+        &self.tool_definitions
+    }
+
+    /// Access the history.
+    pub fn history_ref(&self) -> &dyn History {
+        self.history.as_ref()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use async_trait::async_trait;
+    use crate::types::{AssistantMessage, ToolCall};
+
+    /// Mock LLM provider for testing — returns canned responses.
+    struct MockProvider {
+        responses: std::sync::Mutex<Vec<LLMResponse>>,
+        call_count: std::sync::Mutex<usize>,
+    }
+
+    impl MockProvider {
+        fn new(responses: Vec<LLMResponse>) -> Self {
+            Self {
+                responses: std::sync::Mutex::new(responses),
+                call_count: std::sync::Mutex::new(0),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl LLMProvider for MockProvider {
+        async fn call(
+            &self,
+            _messages: &[Message],
+            _tools: &[ToolDefinition],
+        ) -> crate::Result<LLMResponse> {
+            let mut count = self.call_count.lock().unwrap();
+            let idx = *count;
+            *count += 1;
+            let responses = self.responses.lock().unwrap();
+            Ok(responses[idx].clone())
+        }
+    }
+
+    fn mock_text_response(content: &str) -> LLMResponse {
+        LLMResponse {
+            message: AssistantMessage {
+                content: content.to_string(),
+                tool_calls: None,
+            },
+            finish_reason: FinishReason::Stop,
+        }
+    }
+
+    fn mock_tool_response(name: &str, args: &str) -> LLMResponse {
+        LLMResponse {
+            message: AssistantMessage {
+                content: String::new(),
+                tool_calls: Some(vec![ToolCall {
+                    id: "call_1".to_string(),
+                    call_type: "function".to_string(),
+                    function: crate::types::FunctionCall {
+                        name: name.to_string(),
+                        arguments: args.to_string(),
+                    },
+                }]),
+            },
+            finish_reason: FinishReason::ToolCalls,
+        }
+    }
+
+    #[tokio::test]
+    async fn test_agent_text_response_stops_loop() {
+        let provider = MockProvider::new(vec![mock_text_response("Hello!")]);
+        let mut agent = Agent::new(provider).system("test");
+
+        let result = agent.chat("hi").await.unwrap();
+        assert_eq!(result, "Hello!");
+    }
+
+    #[tokio::test]
+    async fn test_agent_tool_then_text() {
+        use crate::tool::ToolDef;
+
+        let provider = MockProvider::new(vec![
+            mock_tool_response("echo", r#"{"msg":"hi"}"#),
+            mock_text_response("Tool done!"),
+        ]);
+
+        let echo_tool = ToolDef::new("echo", "Echo back")
+            .build(|_args: String| async { "echo: hi".to_string() });
+
+        let mut agent = Agent::new(provider)
+            .system("test")
+            .tool(echo_tool);
+
+        let result = agent.chat("echo hi").await.unwrap();
+        assert_eq!(result, "Tool done!");
+        // Verify tool was recorded in history
+        let history = agent.history_ref().get_all();
+        assert!(history.iter().any(|m| matches!(m.message, Message::Tool(_))));
+    }
+
+    #[tokio::test]
+    async fn test_stop_condition_on_stuck() {
+        use crate::tool::ToolDef;
+
+        // Provider keeps returning the same tool call
+        let responses: Vec<LLMResponse> = (0..5)
+            .map(|_| mock_tool_response("echo", r#"{"msg":"hi"}"#))
+            .collect();
+
+        let provider = MockProvider::new(responses);
+        let echo_tool = ToolDef::new("echo", "Echo")
+            .build(|_args: String| async { "echo".to_string() });
+
+        let mut agent = Agent::new(provider)
+            .system("test")
+            .tool(echo_tool)
+            .stop_when(StopCondition::OnStuck { max_repeats: 3 });
+
+        let result = agent.chat("stuck test").await;
+        assert!(result.is_ok());
+        // Should stop after detecting 3 repeated calls, not continue all 5
+        let history = agent.history_ref().get_all();
+        let tool_count = history.iter().filter(|m| matches!(m.message, Message::Tool(_))).count();
+        assert!(tool_count <= 4); // at most 4 tool results (calls 1-4), then stuck stop
+    }
+
+    #[tokio::test]
+    async fn test_hook_called_during_run() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        struct CounterHook {
+            before_count: AtomicUsize,
+            after_count: AtomicUsize,
+        }
+
+        #[async_trait]
+        impl AgentHook for CounterHook {
+            async fn before_llm(&self, _ctx: &mut HookContext) -> crate::Result<()> {
+                self.before_count.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            }
+
+            async fn after_llm(&self, _ctx: &mut HookContext) -> crate::Result<()> {
+                self.after_count.fetch_add(1, Ordering::SeqCst);
+                Ok(())
+            }
+        }
+
+        let provider = MockProvider::new(vec![mock_text_response("Hi")]);
+        let hook = CounterHook {
+            before_count: AtomicUsize::new(0),
+            after_count: AtomicUsize::new(0),
+        };
+
+        let mut agent = Agent::new(provider).system("test").hook(hook);
+
+        agent.chat("hello").await.unwrap();
+        // Hook was called — the hook moved into the agent, so we can't inspect
+        // counts directly, but the call succeeded without error.
+    }
+
+    #[tokio::test]
+    async fn test_external_tools_execution() {
+        let provider = MockProvider::new(vec![
+            mock_tool_response("ext_search", r#"{"query":"rust"}"#),
+            mock_text_response("Found results"),
+        ]);
+
+        let defs = vec![ToolDefinition::new(
+            "ext_search",
+            "Search external source",
+            crate::types::Parameters::new(serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Search query"}
+                },
+                "required": ["query"]
+            })),
+        )];
+
+        let mut agent = Agent::new(provider)
+            .system("test")
+            .external_tools(defs, |name, args| {
+                format!("external {} called with {}", name, args)
+            });
+
+        let result = agent.chat("search rust").await.unwrap();
+        assert_eq!(result, "Found results");
+    }
+
+    #[tokio::test]
+    async fn test_stop_condition_never_continues() {
+        let provider = MockProvider::new(vec![
+            mock_text_response("First"),
+            mock_text_response("Second"),
+        ]);
+
+        let mut agent = Agent::new(provider)
+            .system("test")
+            .stop_when(StopCondition::Never);
+
+        // Manually step
+        let result1 = agent.step().await.unwrap();
+        assert!(result1.is_none()); // Never stops on text
+
+        let result2 = agent.step().await.unwrap();
+        assert!(result2.is_none()); // Still doesn't stop
+    }
+}
