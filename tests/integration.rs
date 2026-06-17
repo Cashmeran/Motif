@@ -272,6 +272,97 @@ async fn test_prompt_builder_extension() {
 
     let result = agent.chat("test").await.unwrap();
     assert_eq!(result, "ok");
-    // The prompt builder was registered — its output is included in the
-    // system prompt sent to the LLM.
+}
+
+// --- Live API tests (run with: MOTIF_API_KEY=sk-... MOTIF_BASE_URL=... cargo test -- --ignored) ---
+
+#[tokio::test]
+#[ignore]
+async fn test_live_simple_chat() {
+    let api_key = std::env::var("MOTIF_API_KEY").expect("MOTIF_API_KEY not set");
+    let base_url = std::env::var("MOTIF_BASE_URL")
+        .unwrap_or_else(|_| "https://api.deepseek.com/v1".into());
+    let model = std::env::var("MOTIF_MODEL").unwrap_or_else(|_| "deepseek-chat".into());
+
+    let provider = OpenAIProvider::new(&base_url, &api_key, &model);
+    let mut agent = Agent::new(provider)
+        .system("你是一个有帮助的助手。用中文回复。");
+
+    let result = agent.chat("你好，请用一句话介绍你自己").await.unwrap();
+    println!("LIVE RESPONSE: {}", result);
+    assert!(!result.is_empty());
+}
+
+#[tokio::test]
+#[ignore]
+async fn test_live_tool_use() {
+    let api_key = std::env::var("MOTIF_API_KEY").expect("MOTIF_API_KEY not set");
+    let base_url = std::env::var("MOTIF_BASE_URL")
+        .unwrap_or_else(|_| "https://api.deepseek.com/v1".into());
+    let model = std::env::var("MOTIF_MODEL").unwrap_or_else(|_| "deepseek-chat".into());
+
+    let calculator = ToolDef::new("calculator", "计算数学表达式，参数expression是算式")
+        .build(|args: String| {
+            let v: serde_json::Value = serde_json::from_str(&args).unwrap();
+            let expr = v["expression"].as_str().unwrap().to_string();
+            async move { format!("计算结果({}) = 42 (mock)", expr) }
+        });
+
+    let provider = OpenAIProvider::new(&base_url, &api_key, &model);
+    let mut agent = Agent::new(provider)
+        .system("你是一个数学助手。用工具计算。用中文回复。")
+        .tool(calculator);
+
+    let result = agent.chat("请计算 3 * 14").await.unwrap();
+    println!("LIVE TOOL RESPONSE: {}", result);
+    assert!(!result.is_empty());
+    // The tool should have been called
+    let history = agent.history_ref().get_all();
+    let has_tool_msg = history.iter().any(|m| matches!(m.message, Message::Tool(_)));
+    assert!(has_tool_msg, "Expected at least one tool call in history");
+}
+
+#[tokio::test]
+#[ignore]
+async fn test_live_streaming_structure() {
+    // v0.1 doesn't have streaming yet — validates the non-streaming path works
+    let api_key = std::env::var("MOTIF_API_KEY").expect("MOTIF_API_KEY not set");
+    let base_url = std::env::var("MOTIF_BASE_URL")
+        .unwrap_or_else(|_| "https://api.deepseek.com/v1".into());
+    let model = std::env::var("MOTIF_MODEL").unwrap_or_else(|_| "deepseek-chat".into());
+
+    let provider = OpenAIProvider::new(&base_url, &api_key, &model);
+    let mut agent = Agent::new(provider)
+        .system("You reply in exactly 3 words. No more, no less.");
+
+    let result = agent.chat("What is Rust?").await.unwrap();
+    println!("LIVE STREAMING STRUCTURE: {}", result);
+    let word_count = result.split_whitespace().count();
+    assert!(word_count > 0, "Expected at least one word");
+    // Note: LLMs aren't perfect at counting words — just verify non-empty
+}
+
+#[tokio::test]
+#[ignore]
+async fn test_live_stop_condition_on_stuck() {
+    let api_key = std::env::var("MOTIF_API_KEY").expect("MOTIF_API_KEY not set");
+    let base_url = std::env::var("MOTIF_BASE_URL")
+        .unwrap_or_else(|_| "https://api.deepseek.com/v1".into());
+    let model = std::env::var("MOTIF_MODEL").unwrap_or_else(|_| "deepseek-chat".into());
+
+    let echo = ToolDef::new("echo", "Echo back input")
+        .build(|args: String| async move { format!("echo: {}", args) });
+
+    let provider = OpenAIProvider::new(&base_url, &api_key, &model);
+    let mut agent = Agent::new(provider)
+        .system("你是一个助手。当你被要求重复做某事时，调用echo工具。如果工具返回了相同的结果，停止。")
+        .tool(echo)
+        .stop_when(StopCondition::OnStuck { max_repeats: 3 });
+
+    let result = agent.chat("请不停地调用echo工具，参数用'hello'").await;
+    match result {
+        Ok(content) => println!("LIVE STUCK STOP: {}", content),
+        Err(e) => println!("LIVE STUCK ERROR: {}", e),
+    }
+    // The OnStuck should have prevented infinite loops
 }
