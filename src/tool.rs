@@ -109,7 +109,7 @@ impl ToolExecutor for Executor {
                 let start = std::time::SystemTime::now();
                 let content = match self.tools.get(&call.function.name) {
                     Some(t) => t.call(call.function.arguments).await,
-                    None => format!("Tool '{}' not found", call.function.name),
+                    None => format!("Tool '{}' not found. Available: {:?}", call.function.name, self.tools.keys().collect::<Vec<_>>()),
                 };
                 let elapsed = start.elapsed().unwrap_or_default();
                 results.push(ToolResult {
@@ -144,7 +144,7 @@ impl ToolExecutor for Executor {
                     let start = std::time::SystemTime::now();
                     let content = match tool {
                         Some(t) => t.call(call.function.arguments).await,
-                        None => format!("Tool '{}' not found", call.function.name),
+                        None => format!("Tool '{}' not found. Available: {:?}", call.function.name, self.tools.keys().collect::<Vec<_>>()),
                     };
                     let elapsed = start.elapsed().unwrap_or_default();
                     (idx, ToolResult {
@@ -160,7 +160,7 @@ impl ToolExecutor for Executor {
             let start = std::time::SystemTime::now();
             let content = match self.tools.get(&call.function.name) {
                 Some(t) => t.call(call.function.arguments).await,
-                None => format!("Tool '{}' not found", call.function.name),
+                None => format!("Tool '{}' not found. Available: {:?}", call.function.name, self.tools.keys().collect::<Vec<_>>()),
             };
             let elapsed = start.elapsed().unwrap_or_default();
             results[idx] = Some(ToolResult {

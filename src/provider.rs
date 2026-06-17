@@ -40,6 +40,9 @@ pub struct OpenAIProvider {
     base_url: String,
     api_key: String,
     model: String,
+    extra_body: serde_json::Map<String, serde_json::Value>,
+    max_retries: usize,
+    retry_delay_ms: u64,
 }
 
 impl OpenAIProvider {
@@ -52,13 +55,84 @@ impl OpenAIProvider {
             base_url: base_url.into(),
             api_key: api_key.into(),
             model: model.into(),
+            extra_body: Default::default(),
+            max_retries: 2,
+            retry_delay_ms: 1000,
         }
     }
 
     /// Configure a custom HTTP client (e.g., with proxy, custom timeouts).
-    pub fn with_client(mut self, client: Client) -> Self {
-        self.client = client;
+    pub fn with_client(mut self, client: Client) -> Self { self.client = client; self }
+
+    /// Add extra body fields (e.g., `temperature`, `top_p`) to every request.
+    pub fn with_body(mut self, key: &str, value: impl Into<serde_json::Value>) -> Self {
+        self.extra_body.insert(key.to_string(), value.into());
         self
+    }
+
+    /// Set max retry attempts for transient errors (default 2).
+    pub fn with_retry(mut self, max: usize) -> Self { self.max_retries = max; self }
+
+    async fn call_with_retry(&self, body: &serde_json::Value) -> crate::Result<LLMResponse> {
+        let url = format!("{}/chat/completions", self.base_url);
+        let mut last_err = None;
+        for attempt in 0..=self.max_retries {
+            if attempt > 0 {
+                tokio::time::sleep(std::time::Duration::from_millis(self.retry_delay_ms * attempt as u64)).await;
+            }
+            let response = match self.client.post(&url)
+                .header("Authorization", format!("Bearer {}", self.api_key))
+                .header("Content-Type", "application/json")
+                .json(body).send().await
+            {
+                Ok(r) => r,
+                Err(e) => { last_err = Some(e.into()); continue; }
+            };
+            let status = response.status();
+            if !status.is_success() {
+                let code = status.as_u16();
+                if code == 429 || code >= 500 { last_err = Some(Error::ApiError { status: code, body: response.text().await.unwrap_or_default() }); continue; }
+                return Err(Error::ApiError { status: code, body: response.text().await.unwrap_or_default() });
+            }
+            let json: Value = response.json().await?;
+            let choice = json["choices"].as_array().and_then(|a| a.first()).ok_or_else(|| Error::ApiError { status: 200, body: format!("No choices: {}", json) })?;
+            let msg = &choice["message"];
+            return Ok(LLMResponse {
+                message: crate::types::AssistantMessage {
+                    content: msg["content"].as_str().unwrap_or("").to_string(),
+                    tool_calls: if let Some(arr) = msg["tool_calls"].as_array() {
+                        Some(arr.iter().map(|tc| crate::types::ToolCall {
+                            id: tc["id"].as_str().unwrap_or("").to_string(),
+                            call_type: tc["type"].as_str().unwrap_or("function").to_string(),
+                            function: crate::types::FunctionCall {
+                                name: tc["function"]["name"].as_str().unwrap_or("").to_string(),
+                                arguments: tc["function"]["arguments"].as_str().unwrap_or("{}").to_string(),
+                            },
+                        }).collect())
+                    } else { None },
+                },
+                finish_reason: match choice["finish_reason"].as_str() {
+                    Some("stop") => crate::types::FinishReason::Stop,
+                    Some("length") => crate::types::FinishReason::Length,
+                    Some("tool_calls") => crate::types::FinishReason::ToolCalls,
+                    Some("content_filter") => crate::types::FinishReason::ContentFilter,
+                    Some(o) => crate::types::FinishReason::Custom(o.to_string()),
+                    None => crate::types::FinishReason::Stop,
+                },
+            });
+        }
+        Err(last_err.unwrap_or_else(|| Error::Custom("max retries exhausted".into())))
+    }
+
+    fn build_request_body(&self, messages: &[Message], tools: &[ToolDefinition], stream: bool) -> serde_json::Value {
+        let mut body = serde_json::json!({
+            "model": self.model,
+            "messages": messages,
+        });
+        if stream { body["stream"] = serde_json::Value::Bool(true); }
+        if !tools.is_empty() { body["tools"] = serde_json::to_value(tools).unwrap(); }
+        for (k, v) in &self.extra_body { body[k] = v.clone(); }
+        body
     }
 }
 
@@ -69,86 +143,8 @@ impl LLMProvider for OpenAIProvider {
         messages: &[Message],
         tools: &[ToolDefinition],
     ) -> crate::Result<LLMResponse> {
-        let url = format!("{}/chat/completions", self.base_url);
-
-        let mut body = serde_json::json!({
-            "model": self.model,
-            "messages": messages,
-        });
-
-        if !tools.is_empty() {
-            body["tools"] = serde_json::to_value(tools)?;
-        }
-
-        let response = self
-            .client
-            .post(&url)
-            .header("Authorization", format!("Bearer {}", self.api_key))
-            .header("Content-Type", "application/json")
-            .json(&body)
-            .send()
-            .await?;
-
-        let status = response.status();
-        if !status.is_success() {
-            let body_text = response.text().await.unwrap_or_default();
-            return Err(Error::ApiError {
-                status: status.as_u16(),
-                body: body_text,
-            });
-        }
-
-        let json: Value = response.json().await?;
-        let choice = json["choices"]
-            .as_array()
-            .and_then(|a| a.first())
-            .ok_or_else(|| Error::ApiError {
-                status: status.as_u16(),
-                body: format!("No choices in response: {}", json),
-            })?;
-        let msg = &choice["message"];
-
-        let content = msg["content"].as_str().unwrap_or("").to_string();
-
-        let tool_calls = if let Some(tc_array) = msg["tool_calls"].as_array() {
-            Some(
-                tc_array
-                    .iter()
-                    .map(|tc| {
-                        Ok(crate::types::ToolCall {
-                            id: tc["id"].as_str().unwrap_or("").to_string(),
-                            call_type: tc["type"].as_str().unwrap_or("function").to_string(),
-                            function: crate::types::FunctionCall {
-                                name: tc["function"]["name"].as_str().unwrap_or("").to_string(),
-                                arguments: tc["function"]["arguments"]
-                                    .as_str()
-                                    .unwrap_or("{}")
-                                    .to_string(),
-                            },
-                        })
-                    })
-                    .collect::<crate::Result<Vec<_>>>()?,
-            )
-        } else {
-            None
-        };
-
-        let finish_reason = match choice["finish_reason"].as_str() {
-            Some("stop") => crate::types::FinishReason::Stop,
-            Some("length") => crate::types::FinishReason::Length,
-            Some("tool_calls") => crate::types::FinishReason::ToolCalls,
-            Some("content_filter") => crate::types::FinishReason::ContentFilter,
-            Some(other) => crate::types::FinishReason::Custom(other.to_string()),
-            None => crate::types::FinishReason::Stop,
-        };
-
-        Ok(LLMResponse {
-            message: crate::types::AssistantMessage {
-                content,
-                tool_calls,
-            },
-            finish_reason,
-        })
+        let body = self.build_request_body(messages, tools, false);
+        self.call_with_retry(&body).await
     }
 
     async fn call_stream(
@@ -157,16 +153,7 @@ impl LLMProvider for OpenAIProvider {
         tools: &[ToolDefinition],
     ) -> crate::Result<LLMStream> {
         let url = format!("{}/chat/completions", self.base_url);
-
-        let mut body = serde_json::json!({
-            "model": self.model,
-            "messages": messages,
-            "stream": true,
-        });
-
-        if !tools.is_empty() {
-            body["tools"] = serde_json::to_value(tools)?;
-        }
+        let body = self.build_request_body(messages, tools, true);
 
         let response = self
             .client

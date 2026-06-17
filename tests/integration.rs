@@ -441,3 +441,59 @@ async fn test_tool_macro_registration() {
         matches!(&m.message, Message::Tool(tm) if tm.content.contains("Hello, World!"))
     }));
 }
+
+// --- #[tool] impl block test ---
+
+/// A stateful counter
+#[derive(Clone)]
+pub struct Counter {
+    value: Arc<Mutex<i64>>,
+}
+
+#[motif::tool]
+impl Counter {
+    /// Increment the counter
+    async fn increment(
+        self,
+        /// Amount to add
+        amount: i64,
+    ) -> String {
+        let mut v = self.value.lock().unwrap();
+        *v += amount;
+        v.to_string()
+    }
+}
+
+#[tokio::test]
+async fn test_tool_impl_block() {
+    let provider = SeqProvider::new(vec![
+        LLMResponse {
+            message: AssistantMessage {
+                content: String::new(),
+                tool_calls: Some(vec![ToolCall {
+                    id: "call_1".into(),
+                    call_type: "function".into(),
+                    function: FunctionCall {
+                        name: "increment".into(),
+                        arguments: r#"{"amount":5}"#.into(),
+                    },
+                }]),
+            },
+            finish_reason: FinishReason::ToolCalls,
+        },
+        text("Counter incremented!"),
+    ]);
+
+    let counter = Counter { value: Arc::new(Mutex::new(0)) };
+    let mut agent = Agent::new(provider)
+        .system("You increment counters.")
+        .bind(counter, Counter::increment);
+
+    let result = agent.chat("increment by 5").await.unwrap();
+    assert_eq!(result, "Counter incremented!");
+
+    let history = agent.history_ref().get_all();
+    assert!(history.iter().any(|m| {
+        matches!(&m.message, Message::Tool(tm) if tm.content == "5")
+    }));
+}
