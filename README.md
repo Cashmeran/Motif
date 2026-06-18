@@ -2,20 +2,6 @@
 
 Rust agent 核心库，2500 行。库优先，全 trait 注入。附带 CLI。
 
-**安装（一行命令）：**
-
-Windows PowerShell:
-```powershell
-irm https://raw.githubusercontent.com/Cashmeran/Motif/main/install.ps1 | iex
-```
-
-Linux / macOS:
-```bash
-curl -fsSL https://raw.githubusercontent.com/Cashmeran/Motif/main/install.sh | bash
-```
-
-**或通过源码安装：**
-
 ```bash
 cargo install --git https://github.com/Cashmeran/Motif.git
 ```
