@@ -57,7 +57,10 @@ pub struct BoundedHistory {
 
 impl BoundedHistory {
     pub fn new(capacity: usize) -> Self {
-        Self { messages: vec![], capacity: capacity.max(1) }
+        Self {
+            messages: vec![],
+            capacity: capacity.max(1),
+        }
     }
 }
 
@@ -65,25 +68,37 @@ impl History for BoundedHistory {
     fn add(&mut self, message: TimedMessage) {
         self.messages.push(message);
         let excess = self.messages.len().saturating_sub(self.capacity);
-        if excess == 0 { return; }
+        if excess == 0 {
+            return;
+        }
         // Drop oldest non-system messages. System messages are pinned.
         // If ALL messages are system, drop from the front anyway.
-        let non_sys_count = self.messages.iter()
+        let non_sys_count = self
+            .messages
+            .iter()
             .filter(|m| !matches!(m.message, crate::types::Message::System(_)))
             .count();
         let can_evict = non_sys_count.min(excess);
         let mut evicted = 0;
         self.messages.retain(|m| {
-            if evicted >= can_evict { return true; }
-            if matches!(m.message, crate::types::Message::System(_)) && non_sys_count > 0 { return true; }
+            if evicted >= can_evict {
+                return true;
+            }
+            if matches!(m.message, crate::types::Message::System(_)) && non_sys_count > 0 {
+                return true;
+            }
             evicted += 1;
             false
         });
     }
 
-    fn get_all(&self) -> &[TimedMessage] { &self.messages }
+    fn get_all(&self) -> &[TimedMessage] {
+        &self.messages
+    }
 
-    fn clear(&mut self) { self.messages.clear(); }
+    fn clear(&mut self) {
+        self.messages.clear();
+    }
 }
 
 #[cfg(test)]
@@ -140,6 +155,8 @@ mod tests {
         // u3 should be the latest user message
         if let Message::User(ref um) = h.get_all()[1].message {
             assert_eq!(um.content, "u3");
-        } else { panic!("expected user message"); }
+        } else {
+            panic!("expected user message");
+        }
     }
 }

@@ -1,14 +1,13 @@
-use std::future::Future;
-use std::sync::Arc;
 use crate::history::{History, InfiniteHistory};
 use crate::hooks::{AgentHook, HookContext, RunContext};
-use crate::provider::LLMProvider;
 use crate::prompt::{self, Prompt, PromptBuilder};
+use crate::provider::LLMProvider;
 use crate::tool::{Executor, RegisteredTool, ToolExecutor};
 use crate::types::{
-    FinishReason, LLMResponse, Message, SystemMessage,
-    TimedMessage, ToolDefinition,
+    FinishReason, LLMResponse, Message, SystemMessage, TimedMessage, ToolDefinition,
 };
+use std::future::Future;
+use std::sync::Arc;
 
 fn normalize_json(json: &str) -> String {
     serde_json::from_str::<serde_json::Value>(json)
@@ -19,8 +18,10 @@ fn normalize_json(json: &str) -> String {
 // --- StopCondition ---
 
 /// Determines when the agent loop should terminate.
+#[derive(Default)]
 pub enum StopCondition {
     /// Stop when the LLM returns a text response (no tool calls).
+    #[default]
     OnText,
     /// Stop after executing N rounds of tool calls.
     AfterNTools(usize),
@@ -32,20 +33,21 @@ pub enum StopCondition {
     Custom(Arc<dyn Fn(&LLMResponse, &[TimedMessage]) -> bool + Send + Sync>),
 }
 
-impl Default for StopCondition {
-    fn default() -> Self {
-        StopCondition::OnText
-    }
-}
 
 impl StopCondition {
-    fn should_stop(&self, response: &LLMResponse, history: &[TimedMessage], recent_calls: &[String]) -> bool {
+    fn should_stop(
+        &self,
+        response: &LLMResponse,
+        history: &[TimedMessage],
+        recent_calls: &[String],
+    ) -> bool {
         match self {
-            StopCondition::OnText => {
-                !matches!(response.finish_reason, FinishReason::ToolCalls)
-            }
+            StopCondition::OnText => !matches!(response.finish_reason, FinishReason::ToolCalls),
             StopCondition::AfterNTools(n) => {
-                let tool_count = history.iter().filter(|m| matches!(m.message, Message::Tool(_))).count();
+                let tool_count = history
+                    .iter()
+                    .filter(|m| matches!(m.message, Message::Tool(_)))
+                    .count();
                 tool_count >= *n
             }
             StopCondition::OnStuck { max_repeats } => {
@@ -111,9 +113,15 @@ impl Agent {
     }
 
     /// Set the model name for runtime context injection in user messages.
-    pub fn model(mut self, model: impl Into<String>) -> Self { self.model = model.into(); self }
+    pub fn model(mut self, model: impl Into<String>) -> Self {
+        self.model = model.into();
+        self
+    }
 
-    pub fn max_iterations(mut self, n: usize) -> Self { self.max_iterations = n; self }
+    pub fn max_iterations(mut self, n: usize) -> Self {
+        self.max_iterations = n;
+        self
+    }
 
     fn refresh_tools(&self) {
         let json = serde_json::to_string(&self.tool_definitions).unwrap_or_default();
@@ -240,11 +248,15 @@ impl Agent {
     /// loop should stop, `Ok(None)` to continue.
     pub async fn step(&mut self) -> crate::Result<Option<String>> {
         // Build L2 extensions from registered PromptBuilders
-        let extensions: Vec<String> = self.prompt_builders.iter()
+        let extensions: Vec<String> = self
+            .prompt_builders
+            .iter()
             .filter_map(|b| b.build())
             .collect();
         let prompt_text = self.prompt.build(&extensions);
-        let system_msg = Message::System(SystemMessage { content: prompt_text });
+        let system_msg = Message::System(SystemMessage {
+            content: prompt_text,
+        });
 
         // Assemble messages for this turn
         let mut turn_messages = vec![system_msg];
@@ -300,8 +312,9 @@ impl Agent {
                     self.recent_tool_calls.push(sig);
                 }
                 if self.recent_tool_calls.len() > 20 {
-                    self.recent_tool_calls =
-                        self.recent_tool_calls.split_off(self.recent_tool_calls.len() - 20);
+                    self.recent_tool_calls = self
+                        .recent_tool_calls
+                        .split_off(self.recent_tool_calls.len() - 20);
                 }
 
                 hook_ctx.tool_calls = calls.clone();
@@ -339,7 +352,11 @@ impl Agent {
         }
 
         // Check stop condition
-        if self.stop_condition.should_stop(&response, self.history.get_all(), &self.recent_tool_calls) {
+        if self.stop_condition.should_stop(
+            &response,
+            self.history.get_all(),
+            &self.recent_tool_calls,
+        ) {
             return Ok(Some(response.message.content));
         }
 
@@ -350,21 +367,30 @@ impl Agent {
     /// Returns true if the loop should continue (recovery was triggered).
     async fn try_recover(&mut self, response: &LLMResponse) -> bool {
         let is_empty = response.message.content.trim().is_empty();
-        let has_tools = response.message.tool_calls.as_ref().map_or(false, |c| !c.is_empty());
+        let has_tools = response
+            .message
+            .tool_calls
+            .as_ref()
+            .is_some_and(|c| !c.is_empty());
 
         if matches!(response.finish_reason, FinishReason::Length) {
             if !is_empty && self.length_continues < self.max_length_continues {
                 self.length_continues += 1;
-                self.history.add(TimedMessage::new(Message::user("continue")));
+                self.history
+                    .add(TimedMessage::new(Message::user("continue")));
                 return true;
             }
-        } else { self.length_continues = 0; }
+        } else {
+            self.length_continues = 0;
+        }
 
         if is_empty && !has_tools && self.empty_retries < self.max_empty_retries {
             self.empty_retries += 1;
             return true;
         }
-        if !is_empty || has_tools { self.empty_retries = 0; }
+        if !is_empty || has_tools {
+            self.empty_retries = 0;
+        }
         false
     }
 
@@ -380,14 +406,20 @@ impl Agent {
         let mut iterations = 0;
         loop {
             if self.max_iterations > 0 && iterations >= self.max_iterations {
-                let drained: Vec<_> = self.history.get_all().iter()
+                let drained: Vec<_> = self
+                    .history
+                    .get_all()
+                    .iter()
                     .filter(|m| matches!(m.message, Message::Assistant(_)))
                     .collect();
-                let fallback = drained.last()
+                let fallback = drained
+                    .last()
                     .and_then(|tm| {
                         if let Message::Assistant(ref a) = tm.message {
                             Some(a.content.clone())
-                        } else { None }
+                        } else {
+                            None
+                        }
                     })
                     .unwrap_or_else(|| "Max iterations reached".to_string());
                 run_ctx.final_content = Some(fallback.clone());
@@ -416,7 +448,8 @@ impl Agent {
                 }
                 Ok(None) => continue,
                 Err(e) => {
-                    let mut error_ctx = HookContext::new(iterations, self.history.get_all().to_vec());
+                    let mut error_ctx =
+                        HookContext::new(iterations, self.history.get_all().to_vec());
                     for hook in &self.hooks {
                         let _ = hook.on_error(&mut error_ctx, &e).await;
                     }
@@ -437,7 +470,11 @@ impl Agent {
     pub async fn chat(&mut self, content: impl Into<String>) -> crate::Result<String> {
         let content = content.into();
         let ctx = prompt::runtime_context(&self.model);
-        let full = if content.is_empty() { ctx } else { format!("{}\n{}", ctx, content) };
+        let full = if content.is_empty() {
+            ctx
+        } else {
+            format!("{}\n{}", ctx, content)
+        };
         self.history.add(TimedMessage::new(Message::user(full)));
         self.run().await
     }
@@ -448,7 +485,9 @@ impl Agent {
     }
 
     /// Total tokens consumed across all LLM calls in this session.
-    pub fn total_tokens_used(&self) -> u64 { self.total_tokens }
+    pub fn total_tokens_used(&self) -> u64 {
+        self.total_tokens
+    }
 
     /// Access the history.
     pub fn history_ref(&self) -> &dyn History {
@@ -459,8 +498,8 @@ impl Agent {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use async_trait::async_trait;
     use crate::types::{AssistantMessage, ToolCall};
+    use async_trait::async_trait;
 
     /// Mock LLM provider for testing — returns canned responses.
     struct MockProvider {
@@ -542,15 +581,15 @@ mod tests {
         let echo_tool = ToolDef::new("echo", "Echo back")
             .build(|_args: String| async { "echo: hi".to_string() });
 
-        let mut agent = Agent::new(provider)
-            
-            .tool(echo_tool);
+        let mut agent = Agent::new(provider).tool(echo_tool);
 
         let result = agent.chat("echo hi").await.unwrap();
         assert_eq!(result, "Tool done!");
         // Verify tool was recorded in history
         let history = agent.history_ref().get_all();
-        assert!(history.iter().any(|m| matches!(m.message, Message::Tool(_))));
+        assert!(history
+            .iter()
+            .any(|m| matches!(m.message, Message::Tool(_))));
     }
 
     #[tokio::test]
@@ -563,11 +602,10 @@ mod tests {
             .collect();
 
         let provider = MockProvider::new(responses);
-        let echo_tool = ToolDef::new("echo", "Echo")
-            .build(|_args: String| async { "echo".to_string() });
+        let echo_tool =
+            ToolDef::new("echo", "Echo").build(|_args: String| async { "echo".to_string() });
 
         let mut agent = Agent::new(provider)
-            
             .tool(echo_tool)
             .stop_when(StopCondition::OnStuck { max_repeats: 3 });
 
@@ -575,7 +613,10 @@ mod tests {
         assert!(result.is_ok());
         // Should stop after detecting 3 repeated calls, not continue all 5
         let history = agent.history_ref().get_all();
-        let tool_count = history.iter().filter(|m| matches!(m.message, Message::Tool(_))).count();
+        let tool_count = history
+            .iter()
+            .filter(|m| matches!(m.message, Message::Tool(_)))
+            .count();
         assert!(tool_count <= 4); // at most 4 tool results (calls 1-4), then stuck stop
     }
 
@@ -633,11 +674,9 @@ mod tests {
             })),
         )];
 
-        let mut agent = Agent::new(provider)
-            
-            .external_tools(defs, |name, args| {
-                format!("external {} called with {}", name, args)
-            });
+        let mut agent = Agent::new(provider).external_tools(defs, |name, args| {
+            format!("external {} called with {}", name, args)
+        });
 
         let result = agent.chat("search rust").await.unwrap();
         assert_eq!(result, "Found results");
@@ -650,9 +689,7 @@ mod tests {
             mock_text_response("Second"),
         ]);
 
-        let mut agent = Agent::new(provider)
-            
-            .stop_when(StopCondition::Never);
+        let mut agent = Agent::new(provider).stop_when(StopCondition::Never);
 
         // Manually step
         let result1 = agent.step().await.unwrap();

@@ -1,9 +1,9 @@
+use crate::types::{Parameters, ToolCall, ToolDefinition, ToolMessage, ToolResult};
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
-use crate::types::{Parameters, ToolCall, ToolDefinition, ToolMessage, ToolResult};
 
 // Re-export the proc macro so users can do `use motif::tool;`
 pub use motif_macros::tool;
@@ -33,11 +33,7 @@ pub trait Tool: Send + Sync {
 
 // --- FunctionTool: wraps an async fn ---
 
-type ToolFn = Arc<
-    dyn Fn(String) -> Pin<Box<dyn Future<Output = String> + Send>>
-        + Send
-        + Sync,
->;
+type ToolFn = Arc<dyn Fn(String) -> Pin<Box<dyn Future<Output = String> + Send>> + Send + Sync>;
 
 pub struct FunctionTool {
     func: ToolFn,
@@ -82,15 +78,23 @@ pub struct Executor {
 
 impl Executor {
     pub fn parallel() -> Self {
-        Self { tools: HashMap::new(), parallel: true }
+        Self {
+            tools: HashMap::new(),
+            parallel: true,
+        }
     }
     pub fn sequential() -> Self {
-        Self { tools: HashMap::new(), parallel: false }
+        Self {
+            tools: HashMap::new(),
+            parallel: false,
+        }
     }
 }
 
 impl Default for Executor {
-    fn default() -> Self { Self::parallel() }
+    fn default() -> Self {
+        Self::parallel()
+    }
 }
 
 #[async_trait]
@@ -100,7 +104,9 @@ impl ToolExecutor for Executor {
     }
 
     async fn execute(&self, calls: Vec<ToolCall>) -> Vec<ToolResult> {
-        if calls.is_empty() { return vec![]; }
+        if calls.is_empty() {
+            return vec![];
+        }
 
         if !self.parallel {
             // Sequential path: simple loop, preserves order
@@ -109,12 +115,20 @@ impl ToolExecutor for Executor {
                 let start = std::time::SystemTime::now();
                 let content = match self.tools.get(&call.function.name) {
                     Some(t) => t.call(call.function.arguments).await,
-                    None => format!("Tool '{}' not found. Available: {:?}", call.function.name, self.tools.keys().collect::<Vec<_>>()),
+                    None => format!(
+                        "Tool '{}' not found. Available: {:?}",
+                        call.function.name,
+                        self.tools.keys().collect::<Vec<_>>()
+                    ),
                 };
                 let elapsed = start.elapsed().unwrap_or_default();
                 results.push(ToolResult {
-                    tool_message: ToolMessage { tool_call_id: call.id, content },
-                    timestamp: start + elapsed, elapsed,
+                    tool_message: ToolMessage {
+                        tool_call_id: call.id,
+                        content,
+                    },
+                    timestamp: start + elapsed,
+                    elapsed,
                 });
             }
             return results;
@@ -123,15 +137,23 @@ impl ToolExecutor for Executor {
         // Parallel path: partition by concurrency safety, preserve order
         let mut indexed: Vec<_> = calls.into_iter().enumerate().collect();
         indexed.sort_by_key(|(_, call)| {
-            self.tools.get(&call.function.name)
-                .map(|t| if t.concurrency_safety() == ConcurrencySafety::ConcurrentSafe { 0 } else { 1 })
+            self.tools
+                .get(&call.function.name)
+                .map(|t| {
+                    if t.concurrency_safety() == ConcurrencySafety::ConcurrentSafe {
+                        0
+                    } else {
+                        1
+                    }
+                })
                 .unwrap_or(0)
         });
 
         let mut results: Vec<Option<ToolResult>> = vec![None; indexed.len()];
 
         let (safe, unsafe_calls): (Vec<_>, Vec<_>) = indexed.into_iter().partition(|(_, call)| {
-            self.tools.get(&call.function.name)
+            self.tools
+                .get(&call.function.name)
                 .map(|t| t.concurrency_safety() == ConcurrencySafety::ConcurrentSafe)
                 .unwrap_or(true)
         });
@@ -144,28 +166,50 @@ impl ToolExecutor for Executor {
                     let start = std::time::SystemTime::now();
                     let content = match tool {
                         Some(t) => t.call(call.function.arguments).await,
-                        None => format!("Tool '{}' not found. Available: {:?}", call.function.name, self.tools.keys().collect::<Vec<_>>()),
+                        None => format!(
+                            "Tool '{}' not found. Available: {:?}",
+                            call.function.name,
+                            self.tools.keys().collect::<Vec<_>>()
+                        ),
                     };
                     let elapsed = start.elapsed().unwrap_or_default();
-                    (idx, ToolResult {
-                        tool_message: ToolMessage { tool_call_id: call.id, content },
-                        timestamp: start + elapsed, elapsed,
-                    })
+                    (
+                        idx,
+                        ToolResult {
+                            tool_message: ToolMessage {
+                                tool_call_id: call.id,
+                                content,
+                            },
+                            timestamp: start + elapsed,
+                            elapsed,
+                        },
+                    )
                 }
-            })).await;
-            for (idx, r) in batch { results[idx] = Some(r); }
+            }))
+            .await;
+            for (idx, r) in batch {
+                results[idx] = Some(r);
+            }
         }
 
         for (idx, call) in unsafe_calls {
             let start = std::time::SystemTime::now();
             let content = match self.tools.get(&call.function.name) {
                 Some(t) => t.call(call.function.arguments).await,
-                None => format!("Tool '{}' not found. Available: {:?}", call.function.name, self.tools.keys().collect::<Vec<_>>()),
+                None => format!(
+                    "Tool '{}' not found. Available: {:?}",
+                    call.function.name,
+                    self.tools.keys().collect::<Vec<_>>()
+                ),
             };
             let elapsed = start.elapsed().unwrap_or_default();
             results[idx] = Some(ToolResult {
-                tool_message: ToolMessage { tool_call_id: call.id, content },
-                timestamp: start + elapsed, elapsed,
+                tool_message: ToolMessage {
+                    tool_call_id: call.id,
+                    content,
+                },
+                timestamp: start + elapsed,
+                elapsed,
             });
         }
 
@@ -207,7 +251,10 @@ impl ToolDef {
         let mut prop_schema = serde_json::to_value(&schema).unwrap_or_default();
         // Add description
         if let Some(obj) = prop_schema.as_object_mut() {
-            obj.insert("description".to_string(), serde_json::Value::String(description.into()));
+            obj.insert(
+                "description".to_string(),
+                serde_json::Value::String(description.into()),
+            );
             // Remove top-level $schema/title metadata
             obj.remove("$schema");
             obj.remove("title");
@@ -219,11 +266,23 @@ impl ToolDef {
 
     pub fn build_definition(&self) -> ToolDefinition {
         let mut params = serde_json::Map::new();
-        params.insert("type".to_string(), serde_json::Value::String("object".to_string()));
-        params.insert("properties".to_string(), serde_json::Value::Object(self.properties.clone()));
-        params.insert("required".to_string(), serde_json::Value::Array(
-            self.required.iter().map(|r| serde_json::Value::String(r.clone())).collect()
-        ));
+        params.insert(
+            "type".to_string(),
+            serde_json::Value::String("object".to_string()),
+        );
+        params.insert(
+            "properties".to_string(),
+            serde_json::Value::Object(self.properties.clone()),
+        );
+        params.insert(
+            "required".to_string(),
+            serde_json::Value::Array(
+                self.required
+                    .iter()
+                    .map(|r| serde_json::Value::String(r.clone()))
+                    .collect(),
+            ),
+        );
 
         ToolDefinition::new(
             &self.name,

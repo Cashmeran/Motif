@@ -12,7 +12,10 @@ pub enum Error {
     Json(#[from] serde_json::Error),
 
     #[error("Tool '{name}' not found. Available: {available:?}")]
-    ToolNotFound { name: String, available: Vec<String> },
+    ToolNotFound {
+        name: String,
+        available: Vec<String>,
+    },
 
     #[error("{0}")]
     Custom(String),
@@ -23,10 +26,16 @@ pub enum Error {
 impl Clone for Error {
     fn clone(&self) -> Self {
         match self {
-            Error::ApiError { status, body } => Error::ApiError { status: *status, body: body.clone() },
+            Error::ApiError { status, body } => Error::ApiError {
+                status: *status,
+                body: body.clone(),
+            },
             Error::Http(e) => Error::Custom(format!("Http: {}", e)),
             Error::Json(e) => Error::Custom(format!("Json: {}", e)),
-            Error::ToolNotFound { name, available } => Error::ToolNotFound { name: name.clone(), available: available.clone() },
+            Error::ToolNotFound { name, available } => Error::ToolNotFound {
+                name: name.clone(),
+                available: available.clone(),
+            },
             Error::Custom(s) => Error::Custom(s.clone()),
         }
     }

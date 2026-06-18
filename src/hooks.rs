@@ -1,6 +1,6 @@
-use async_trait::async_trait;
 use crate::error::Error;
 use crate::types::{LLMResponse, TimedMessage, ToolCall, ToolResult};
+use async_trait::async_trait;
 
 // --- Context types ---
 
@@ -38,6 +38,12 @@ pub struct RunContext {
     pub error: Option<Error>,
 }
 
+impl Default for RunContext {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl RunContext {
     pub fn new() -> Self {
         Self {
@@ -55,22 +61,38 @@ impl RunContext {
 #[async_trait]
 pub trait AgentHook: Send + Sync {
     // --- Run-level ---
-    async fn before_run(&self, _ctx: &mut RunContext) -> crate::Result<()> { Ok(()) }
-    async fn after_run(&self, _ctx: &mut RunContext) -> crate::Result<()> { Ok(()) }
+    async fn before_run(&self, _ctx: &mut RunContext) -> crate::Result<()> {
+        Ok(())
+    }
+    async fn after_run(&self, _ctx: &mut RunContext) -> crate::Result<()> {
+        Ok(())
+    }
 
     // --- Iteration-level ---
-    async fn before_llm(&self, _ctx: &mut HookContext) -> crate::Result<()> { Ok(()) }
-    async fn after_llm(&self, _ctx: &mut HookContext) -> crate::Result<()> { Ok(()) }
+    async fn before_llm(&self, _ctx: &mut HookContext) -> crate::Result<()> {
+        Ok(())
+    }
+    async fn after_llm(&self, _ctx: &mut HookContext) -> crate::Result<()> {
+        Ok(())
+    }
 
     // --- Tool-level ---
-    async fn before_tools(&self, _ctx: &mut HookContext) -> crate::Result<()> { Ok(()) }
-    async fn after_tools(&self, _ctx: &mut HookContext) -> crate::Result<()> { Ok(()) }
+    async fn before_tools(&self, _ctx: &mut HookContext) -> crate::Result<()> {
+        Ok(())
+    }
+    async fn after_tools(&self, _ctx: &mut HookContext) -> crate::Result<()> {
+        Ok(())
+    }
 
     // --- Error ---
-    async fn on_error(&self, _ctx: &mut HookContext, _error: &Error) -> crate::Result<()> { Ok(()) }
+    async fn on_error(&self, _ctx: &mut HookContext, _error: &Error) -> crate::Result<()> {
+        Ok(())
+    }
 
     // --- Content post-processing ---
-    fn finalize_content(&self, content: &str) -> String { content.to_string() }
+    fn finalize_content(&self, content: &str) -> String {
+        content.to_string()
+    }
 }
 
 #[cfg(test)]
@@ -92,7 +114,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_hook_lifecycle_called() {
-        let hook = CountingHook { before_count: Mutex::new(0) };
+        let hook = CountingHook {
+            before_count: Mutex::new(0),
+        };
         let mut ctx = HookContext::new(0, vec![]);
         hook.before_llm(&mut ctx).await.unwrap();
         // Hook was called successfully

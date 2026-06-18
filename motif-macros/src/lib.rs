@@ -13,12 +13,16 @@ struct ToolAttr {
 
 impl Parse for ToolAttr {
     fn parse(input: ParseStream) -> syn::Result<Self> {
-        if input.is_empty() { return Ok(ToolAttr { name: None }); }
+        if input.is_empty() {
+            return Ok(ToolAttr { name: None });
+        }
         let ident: Ident = input.parse()?;
         if ident == "name" {
             input.parse::<Token![=]>()?;
             let lit: syn::LitStr = input.parse()?;
-            Ok(ToolAttr { name: Some(lit.value()) })
+            Ok(ToolAttr {
+                name: Some(lit.value()),
+            })
         } else {
             Err(syn::Error::new(ident.span(), "expected `name = \"...\"`"))
         }
@@ -53,8 +57,17 @@ fn expand_fn(input: ItemFn, tool_attr: ToolAttr) -> TokenStream2 {
         orig_fn_name.span(),
     );
 
-    let params: Vec<_> = input.sig.inputs.iter()
-        .filter_map(|arg| if let FnArg::Typed(pt) = arg { Some(pt) } else { None })
+    let params: Vec<_> = input
+        .sig
+        .inputs
+        .iter()
+        .filter_map(|arg| {
+            if let FnArg::Typed(pt) = arg {
+                Some(pt)
+            } else {
+                None
+            }
+        })
         .collect();
 
     let (names, types, param_attrs, docs) = param_data(&params);
@@ -137,9 +150,18 @@ fn expand_impl_method_parts(method: &ImplItemFn) -> (TokenStream2, TokenStream2)
         fn_name.span(),
     );
 
-    let params: Vec<_> = method.sig.inputs.iter()
+    let params: Vec<_> = method
+        .sig
+        .inputs
+        .iter()
         .filter(|arg| !matches!(arg, FnArg::Receiver(_)))
-        .filter_map(|arg| if let FnArg::Typed(pt) = arg { Some(pt) } else { None })
+        .filter_map(|arg| {
+            if let FnArg::Typed(pt) = arg {
+                Some(pt)
+            } else {
+                None
+            }
+        })
         .collect();
 
     let (names, types, param_attrs, docs) = param_data(&params);
@@ -148,7 +170,12 @@ fn expand_impl_method_parts(method: &ImplItemFn) -> (TokenStream2, TokenStream2)
     let block = &method.block;
     let tool_name = fn_name.to_string();
     let ret_ty = ret_type(&method.sig.output);
-    let has_self = method.sig.inputs.first().map(|a| matches!(a, FnArg::Receiver(_))).unwrap_or(false);
+    let has_self = method
+        .sig
+        .inputs
+        .first()
+        .map(|a| matches!(a, FnArg::Receiver(_)))
+        .unwrap_or(false);
 
     let struct_def = quote! {
         #[derive(serde::Deserialize, schemars::JsonSchema, Clone, Debug)]
@@ -187,14 +214,25 @@ fn expand_impl_method_parts(method: &ImplItemFn) -> (TokenStream2, TokenStream2)
 
 // ============ helpers ============
 
-fn param_data<'a>(params: &[&'a syn::PatType]) -> (Vec<&'a Ident>, Vec<&'a syn::Type>, Vec<Vec<TokenStream2>>, Vec<String>) {
-    let mut names = Vec::new(); let mut types = Vec::new();
-    let mut attrs_tokens = Vec::new(); let mut docs = Vec::new();
+fn param_data<'a>(
+    params: &[&'a syn::PatType],
+) -> (
+    Vec<&'a Ident>,
+    Vec<&'a syn::Type>,
+    Vec<Vec<TokenStream2>>,
+    Vec<String>,
+) {
+    let mut names = Vec::new();
+    let mut types = Vec::new();
+    let mut attrs_tokens = Vec::new();
+    let mut docs = Vec::new();
     for pt in params {
         if let Pat::Ident(pi) = pt.pat.as_ref() {
             names.push(&pi.ident);
             types.push(pt.ty.as_ref());
-            let non_doc: Vec<_> = pt.attrs.iter()
+            let non_doc: Vec<_> = pt
+                .attrs
+                .iter()
                 .filter(|a| !a.path().is_ident("doc"))
                 .map(|a| a.to_token_stream())
                 .collect();
@@ -219,22 +257,34 @@ fn extract_doc_comment(attrs: &[syn::Attribute], fallback: &Ident) -> String {
             if let syn::Meta::NameValue(mnv) = &attr.meta {
                 if let syn::Expr::Lit(lit) = &mnv.value {
                     if let syn::Lit::Str(s) = &lit.lit {
-                        if !doc.is_empty() { doc.push('\n'); }
+                        if !doc.is_empty() {
+                            doc.push('\n');
+                        }
                         doc.push_str(s.value().trim());
                     }
                 }
             }
         }
     }
-    if doc.is_empty() { fallback.to_string() } else { doc }
+    if doc.is_empty() {
+        fallback.to_string()
+    } else {
+        doc
+    }
 }
 
 fn to_pascal_case(s: &str) -> String {
-    let mut r = String::new(); let mut cap = true;
+    let mut r = String::new();
+    let mut cap = true;
     for ch in s.chars() {
-        if ch == '_' { cap = true; }
-        else if cap { r.push(ch.to_ascii_uppercase()); cap = false; }
-        else { r.push(ch); }
+        if ch == '_' {
+            cap = true;
+        } else if cap {
+            r.push(ch.to_ascii_uppercase());
+            cap = false;
+        } else {
+            r.push(ch);
+        }
     }
     r
 }
