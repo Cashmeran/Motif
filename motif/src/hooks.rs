@@ -84,6 +84,24 @@ pub trait AgentHook: Send + Sync {
         Ok(())
     }
 
+    // --- Message-level ---
+    /// Called before a message is appended to history. Return `Ok(false)` to discard.
+    async fn on_message(&self, _msg: &TimedMessage) -> crate::Result<bool> { Ok(true) }
+
+    // --- Stop-level ---
+    /// Called after stop condition is evaluated. Return `Ok(false)` to override
+    /// exit and continue the loop (Ralph Loop gate pattern).
+    async fn on_stop_check(
+        &self,
+        _ctx: &mut HookContext,
+        should_stop: bool,
+    ) -> crate::Result<bool> { Ok(should_stop) }
+
+    // --- Request-level ---
+    /// Called before the provider is invoked. The hook receives the
+    /// assembled messages. Modifications to ctx.messages will be reflected.
+    async fn on_request(&self, _ctx: &mut HookContext) -> crate::Result<()> { Ok(()) }
+
     // --- Error ---
     async fn on_error(&self, _ctx: &mut HookContext, _error: &Error) -> crate::Result<()> {
         Ok(())

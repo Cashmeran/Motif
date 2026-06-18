@@ -275,6 +275,13 @@ impl Agent {
             }
         }
 
+        // Hook: on_request — final gate before provider
+        for hook in &self.hooks {
+            if let Err(e) = hook.on_request(&mut hook_ctx).await {
+                tracing::warn!("Hook.on_request error: {}", e);
+            }
+        }
+
         // Call LLM
         let llm_start = std::time::Instant::now();
         let response = self
@@ -293,8 +300,22 @@ impl Agent {
             timestamp: std::time::SystemTime::now(),
             elapsed,
         };
-        self.history.add(assoc_msg.clone());
-        hook_ctx.messages.push(assoc_msg);
+        // Hook: on_message — filter messages before history
+        let keep = {
+            let mut ok = true;
+            for hook in &self.hooks {
+                match hook.on_message(&assoc_msg).await {
+                    Ok(false) => ok = false,
+                    Err(e) => tracing::warn!("Hook.on_message error: {}", e),
+                    _ => {}
+                }
+            }
+            ok
+        };
+        if keep {
+            self.history.add(assoc_msg.clone());
+            hook_ctx.messages.push(assoc_msg);
+        }
 
         // Hook: after_llm
         hook_ctx.response = Some(response.clone());
@@ -353,12 +374,17 @@ impl Agent {
             return Ok(None);
         }
 
-        // Check stop condition
-        if self.stop_condition.should_stop(
-            &response,
-            self.history.get_all(),
-            &self.recent_tool_calls,
-        ) {
+        // Check stop condition — hooks can override exit (Ralph Loop gate)
+        let mut should_stop = self.stop_condition.should_stop(
+            &response, self.history.get_all(), &self.recent_tool_calls);
+        for hook in &self.hooks {
+            match hook.on_stop_check(&mut hook_ctx, should_stop).await {
+                Ok(false) => should_stop = false,
+                Err(e) => tracing::warn!("Hook.on_stop_check error: {}", e),
+                _ => {}
+            }
+        }
+        if should_stop {
             return Ok(Some(response.message.content));
         }
 
