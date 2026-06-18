@@ -2,10 +2,11 @@
 name = "motif-tools"
 version = "0.1.0"
 edition = "2021"
-description = "Built-in tools for Motif: search, read, write, bash"
+description = "Built-in tools for Motif: search, read, write, edit, bash, web_fetch"
 
 [dependencies]
 motif = { path = "../motif" }
 serde_json = "1"
 regex = "1"
 tokio = { version = "1", features = ["full"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }

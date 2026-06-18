@@ -1,6 +1,8 @@
 pub mod bash;
+pub mod edit;
 pub mod read;
 pub mod search;
+pub mod web_fetch;
 pub mod write;
 
 use std::path::Path;

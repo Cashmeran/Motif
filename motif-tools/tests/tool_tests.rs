@@ -1,8 +1,9 @@
 //! Stress / correctness tests for built-in tools.
 //! These tests exercise the actual tool implementations against real files.
 
-use motif_tools::{bash, read, search, write};
+use motif_tools::{bash, edit, read, search, web_fetch, write};
 use motif::Tool;
+
 use std::fs;
 use std::path::Path;
 use std::sync::Arc;
@@ -217,4 +218,69 @@ fn test_search_multiline_regex() {
     // Just verify it doesn't crash on multiline
     assert!(!result.contains("Invalid regex"));
     fs::remove_file("test_multiline.txt").ok();
+}
+
+// ── Edit ──
+
+#[test]
+fn test_edit_basic_replace() {
+    fs::write("test_edit.txt", "Hello World").unwrap();
+    let (_, tool) = edit::register().into_parts();
+    let result = call_tool(&tool, r#"{"file_path":"test_edit.txt","old_string":"World","new_string":"Rust"}"#);
+    assert!(result.contains("Edited"), "Got: {}", result);
+    let content = fs::read_to_string("test_edit.txt").unwrap();
+    assert_eq!(content, "Hello Rust");
+    fs::remove_file("test_edit.txt").ok();
+}
+
+#[test]
+fn test_edit_duplicate_old_string() {
+    fs::write("test_edit_dup.txt", "A B A").unwrap();
+    let (_, tool) = edit::register().into_parts();
+    let result = call_tool(&tool, r#"{"file_path":"test_edit_dup.txt","old_string":"A","new_string":"X"}"#);
+    assert!(result.contains("appears 2 times"), "Got: {}", result);
+    fs::remove_file("test_edit_dup.txt").ok();
+}
+
+#[test]
+fn test_edit_replace_all() {
+    fs::write("test_edit_all.txt", "A B A").unwrap();
+    let (_, tool) = edit::register().into_parts();
+    let result = call_tool(&tool, r#"{"file_path":"test_edit_all.txt","old_string":"A","new_string":"X","replace_all":true}"#);
+    assert!(result.contains("Replaced 2"), "Got: {}", result);
+    fs::remove_file("test_edit_all.txt").ok();
+}
+
+#[test]
+fn test_edit_not_found() {
+    fs::write("test_edit_nf.txt", "hello").unwrap();
+    let (_, tool) = edit::register().into_parts();
+    let result = call_tool(&tool, r#"{"file_path":"test_edit_nf.txt","old_string":"world","new_string":"x"}"#);
+    assert!(result.contains("not found"), "Got: {}", result);
+    fs::remove_file("test_edit_nf.txt").ok();
+}
+
+#[test]
+fn test_edit_idempotent() {
+    fs::write("test_edit_same.txt", "same").unwrap();
+    let (_, tool) = edit::register().into_parts();
+    let result = call_tool(&tool, r#"{"file_path":"test_edit_same.txt","old_string":"same","new_string":"same"}"#);
+    assert!(result.contains("identical"), "Got: {}", result);
+    fs::remove_file("test_edit_same.txt").ok();
+}
+
+// ── Web Fetch ──
+
+#[test]
+fn test_web_fetch_invalid_url() {
+    let (_, tool) = web_fetch::register().into_parts();
+    let result = call_tool(&tool, r#"{"url":"not-a-url"}"#);
+    assert!(result.contains("only http and https"), "Got: {}", result);
+}
+
+#[test]
+fn test_web_fetch_empty_url() {
+    let (_, tool) = web_fetch::register().into_parts();
+    let result = call_tool(&tool, r#"{"url":""}"#);
+    assert!(result.contains("required"), "Got: {}", result);
 }
