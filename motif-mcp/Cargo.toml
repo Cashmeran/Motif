@@ -1,0 +1,9 @@
+[package]
+name = "motif-mcp"
+version = "0.1.0"
+edition = "2021"
+description = "MCP bridge for Motif agent — connect Model Context Protocol servers as tools"
+
+[dependencies]
+motif = { path = ".." }
+serde_json = "1"

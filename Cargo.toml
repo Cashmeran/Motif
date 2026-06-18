@@ -1,5 +1,5 @@
 [workspace]
-members = ["macros"]
+members = ["macros", "motif-mcp", "motif-skill"]
 
 [package]
 name = "motif"
