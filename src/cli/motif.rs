@@ -155,5 +155,10 @@ async fn main() {
 fn make_agent(cfg: &Config) -> Agent {
     let provider =
         OpenAIProvider::new(cfg.base_url.clone(), cfg.api_key.clone(), cfg.model.clone());
-    Agent::new(provider).model(&cfg.model).max_iterations(100)
+    Agent::new(provider)
+        .model(&cfg.model)
+        .max_iterations(100)
+        .tool(motif::tools::search::register())
+        .tool(motif::tools::read::register())
+        .tool(motif::tools::write::register())
 }
