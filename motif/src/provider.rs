@@ -6,19 +6,9 @@ use serde::Deserialize;
 /// LLM Provider abstraction with streaming support.
 #[async_trait]
 pub trait LLMProvider: Send + Sync {
-    /// Non-streaming call — used for internal agent decision-making.
-    async fn call(
-        &self,
-        messages: &[Message],
-        tools: &[ToolDefinition],
-    ) -> crate::Result<LLMResponse>;
+    async fn call(&self, messages: &[Message], tools: &[ToolDefinition]) -> crate::Result<LLMResponse>;
 
-    /// Streaming call — for UI rendering. Default falls back to `call()`.
-    async fn call_stream(
-        &self,
-        messages: &[Message],
-        tools: &[ToolDefinition],
-    ) -> crate::Result<LLMStream> {
+    async fn call_stream(&self, messages: &[Message], tools: &[ToolDefinition]) -> crate::Result<LLMStream> {
         let response = self.call(messages, tools).await?;
         let (tx, rx) = tokio::sync::mpsc::channel(2);
         let content = response.message.content.clone();
@@ -31,12 +21,48 @@ pub trait LLMProvider: Send + Sync {
     }
 }
 
+// --- API format ---
+
+/// Which API protocol the provider uses. DeepSeek supports both.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ApiFormat {
+    /// OpenAI `/v1/chat/completions` (default)
+    OpenAI,
+    /// Anthropic `/messages` — DeepSeek at `/anthropic/messages`
+    Anthropic,
+}
+
 // --- API response types ---
 
 #[derive(Deserialize)]
 struct ChatResponse {
     choices: Vec<ChatChoice>,
     usage: Option<ChatUsage>,
+}
+
+// Anthropic response types
+#[derive(Deserialize)]
+struct AnthropicResponse {
+    content: Vec<AnthropicContent>,
+    stop_reason: Option<String>,
+    usage: Option<AnthropicUsage>,
+}
+#[derive(Deserialize)]
+struct AnthropicContent {
+    text: Option<String>,
+    #[serde(rename = "type")]
+    content_type: String,
+    #[serde(default)]
+    input: Option<serde_json::Value>,
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    id: Option<String>,
+}
+#[derive(Deserialize)]
+struct AnthropicUsage {
+    input_tokens: Option<u32>,
+    output_tokens: Option<u32>,
 }
 #[derive(Deserialize)]
 struct ChatChoice {
@@ -78,6 +104,7 @@ pub struct OpenAIProvider {
     base_url: String,
     api_key: String,
     model: String,
+    format: ApiFormat,
     extra_body: serde_json::Map<String, serde_json::Value>,
     max_retries: usize,
     retry_delay_ms: u64,
@@ -98,6 +125,7 @@ impl OpenAIProvider {
             base_url: base_url.into(),
             api_key: api_key.into(),
             model: model.into(),
+            format: ApiFormat::OpenAI,
             extra_body: Default::default(),
             max_retries: 2,
             retry_delay_ms: 1000,
@@ -121,14 +149,18 @@ impl OpenAIProvider {
     pub fn with_retry(mut self, max: usize) -> Self { self.max_retries = max; self }
 
     /// Enable DeepSeek thinking mode (reasoning_effort: "high" or "max").
-    pub fn with_thinking(mut self, effort: &str) -> Self {
-        self.thinking_effort = Some(effort.to_string());
-        self
-    }
+    pub fn with_thinking(mut self, effort: &str) -> Self { self.thinking_effort = Some(effort.to_string()); self }
+
+    /// Use Anthropic Messages API format (DeepSeek `/anthropic/messages` endpoint).
+    pub fn with_anthropic(mut self) -> Self { self.format = ApiFormat::Anthropic; self }
 
     /// Send a POST with retry. On success returns the reqwest Response for parsing.
     async fn post_with_retry(&self, body: &serde_json::Value) -> crate::Result<reqwest::Response> {
-        let url = format!("{}/chat/completions", self.base_url);
+        let url = if self.format == ApiFormat::Anthropic {
+            format!("{}/messages", self.base_url)
+        } else {
+            format!("{}/chat/completions", self.base_url)
+        };
         let mut last_err = None;
         for attempt in 0..=self.max_retries {
             if attempt > 0 {
@@ -137,20 +169,17 @@ impl OpenAIProvider {
                 ))
                 .await;
             }
-            let response = match self
-                .client
-                .post(&url)
-                .header("Authorization", format!("Bearer {}", self.api_key))
+            let mut req = self.client.post(&url)
                 .header("Content-Type", "application/json")
-                .json(body)
-                .send()
-                .await
-            {
+                .json(body);
+            if self.format == ApiFormat::Anthropic {
+                req = req.header("x-api-key", &self.api_key);
+            } else {
+                req = req.header("Authorization", format!("Bearer {}", self.api_key));
+            }
+            let response = match req.send().await {
                 Ok(r) => r,
-                Err(e) => {
-                    last_err = Some(e.into());
-                    continue;
-                }
+                Err(e) => { last_err = Some(e.into()); continue; }
             };
             let status = response.status();
             if !status.is_success() {
@@ -215,6 +244,10 @@ impl OpenAIProvider {
         tools: &[ToolDefinition],
         stream: bool,
     ) -> serde_json::Value {
+        if self.format == ApiFormat::Anthropic {
+            return self.build_anthropic_body(messages, tools, stream);
+        }
+
         let mut body = serde_json::json!({
             "model": self.model,
             "messages": messages,
@@ -230,6 +263,108 @@ impl OpenAIProvider {
         for (k, v) in &self.extra_body { body[k] = v.clone(); }
         body
     }
+
+    fn build_anthropic_body(&self, messages: &[Message], tools: &[ToolDefinition], stream: bool) -> serde_json::Value {
+        // System prompt: top-level `system` field (not in messages array)
+        let system = messages.iter().filter_map(|m| {
+            if let Message::System(ref s) = m { Some(s.content.as_str()) } else { None }
+        }).collect::<Vec<_>>().join("\n\n");
+
+        // Conversation messages: Anthropic format uses content blocks
+        let anthropic_msgs: Vec<serde_json::Value> = messages.iter()
+            .filter(|m| !matches!(m, Message::System(_)))
+            .map(|m| match m {
+                Message::User(ref u) => serde_json::json!({
+                    "role": "user",
+                    "content": [{"type": "text", "text": u.content}]
+                }),
+                Message::Assistant(ref a) => {
+                    let mut blocks: Vec<serde_json::Value> = Vec::new();
+                    if !a.content.is_empty() {
+                        blocks.push(serde_json::json!({"type": "text", "text": a.content}));
+                    }
+                    if let Some(ref tool_calls) = a.tool_calls {
+                        for tc in tool_calls {
+                            let input: serde_json::Value = serde_json::from_str(&tc.function.arguments).unwrap_or_default();
+                            blocks.push(serde_json::json!({
+                                "type": "tool_use",
+                                "id": tc.id,
+                                "name": tc.function.name,
+                                "input": input,
+                            }));
+                        }
+                    }
+                    serde_json::json!({"role": "assistant", "content": blocks})
+                }
+                Message::Tool(ref t) => serde_json::json!({
+                    "role": "user",
+                    "content": [{"type": "tool_result", "tool_use_id": t.tool_call_id, "content": t.content}]
+                }),
+                Message::System(_) => serde_json::json!({"role": "user", "content": ""}), // unreachable: filtered above
+            }).collect();
+
+        let mut body = serde_json::json!({
+            "model": self.model,
+            "max_tokens": 4096,
+            "messages": anthropic_msgs,
+        });
+        if stream { body["stream"] = serde_json::Value::Bool(true); }
+        if !system.is_empty() { body["system"] = serde_json::Value::String(system); }
+        if !tools.is_empty() {
+            body["tools"] = serde_json::json!(tools.iter().map(|t| serde_json::json!({
+                "name": t.function.name,
+                "description": t.function.description,
+                "input_schema": serde_json::to_value(&t.function.parameters).unwrap_or_default(),
+            })).collect::<Vec<_>>());
+        }
+        // DeepSeek thinking via Anthropic format
+        if let Some(ref effort) = self.thinking_effort {
+            body["thinking"] = serde_json::json!({"type": "enabled"});
+            body["output_config"] = serde_json::json!({"effort": effort});
+        }
+        for (k, v) in &self.extra_body { body[k] = v.clone(); }
+        body
+    }
+
+    fn parse_anthropic_response(json: serde_json::Value) -> crate::Result<LLMResponse> {
+        let resp: AnthropicResponse = serde_json::from_value(json)?;
+        let mut content = String::new();
+        let mut tool_calls = Vec::new();
+        for block in &resp.content {
+            match block.content_type.as_str() {
+                "text" => { if let Some(ref t) = block.text { content.push_str(t); } }
+                "tool_use" => {
+                    tool_calls.push(crate::types::ToolCall {
+                        id: block.id.clone().unwrap_or_default(),
+                        call_type: "function".to_string(),
+                        function: crate::types::FunctionCall {
+                            name: block.name.clone().unwrap_or_default(),
+                            arguments: block.input.as_ref().map(|v| v.to_string()).unwrap_or_default(),
+                        },
+                    });
+                }
+                _ => {}
+            }
+        }
+        Ok(LLMResponse {
+            message: crate::types::AssistantMessage {
+                content,
+                tool_calls: if tool_calls.is_empty() { None } else { Some(tool_calls) },
+            },
+            finish_reason: match resp.stop_reason.as_deref() {
+                Some("end_turn") => FinishReason::Stop,
+                Some("tool_use") => FinishReason::ToolCalls,
+                Some("max_tokens") => FinishReason::Length,
+                Some(o) => FinishReason::Custom(o.to_string()),
+                None => FinishReason::Stop,
+            },
+            usage: resp.usage.map(|u| crate::types::TokenUsage {
+                prompt_tokens: u.input_tokens.unwrap_or(0),
+                completion_tokens: u.output_tokens.unwrap_or(0),
+                total_tokens: u.input_tokens.unwrap_or(0) + u.output_tokens.unwrap_or(0),
+            }),
+        })
+    }
 }
 
 #[async_trait]
@@ -242,7 +377,11 @@ impl LLMProvider for OpenAIProvider {
         let body = self.build_request_body(messages, tools, false);
         let response = self.post_with_retry(&body).await?;
         let json: Value = response.json().await?;
-        Self::parse_response(json)
+        if self.format == ApiFormat::Anthropic {
+            Self::parse_anthropic_response(json)
+        } else {
+            Self::parse_response(json)
+        }
     }
 
     async fn call_stream(

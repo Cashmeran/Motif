@@ -19,6 +19,18 @@ pub enum ConcurrencySafety {
     ConcurrentUnsafe,
 }
 
+/// Semantic metadata about a tool. Not sent to the LLM; used by
+/// Executors, Hooks, and permission systems.
+#[derive(Debug, Clone, Default)]
+pub struct ToolMetadata {
+    /// True if this tool never modifies state.
+    pub read_only: bool,
+    /// True if calling this tool twice with identical args is safe (no side-effects).
+    pub idempotent: bool,
+    /// Optional grouping hint, e.g. "file", "network", "compute".
+    pub category: Option<String>,
+}
+
 /// A callable tool. Accepts JSON string arguments, returns a string result.
 #[async_trait]
 pub trait Tool: Send + Sync {
@@ -28,6 +40,12 @@ pub trait Tool: Send + Sync {
     /// Default: ConcurrentSafe.
     fn concurrency_safety(&self) -> ConcurrencySafety {
         ConcurrencySafety::ConcurrentSafe
+    }
+
+    /// Semantic metadata for external systems (hooks, permissions, executors).
+    /// Default: all false, no category.
+    fn metadata(&self) -> ToolMetadata {
+        ToolMetadata::default()
     }
 }
 
