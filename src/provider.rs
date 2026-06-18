@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use serde::Deserialize;
 use crate::types::{FinishReason, LLMResponse, LLMStream, Message, StreamEvent, ToolDefinition};
 use crate::error::Error;
 
@@ -29,6 +30,15 @@ pub trait LLMProvider: Send + Sync {
         Ok(LLMStream { receiver: rx })
     }
 }
+
+// --- API response types ---
+
+#[derive(Deserialize)] struct ChatResponse { choices: Vec<ChatChoice>, usage: Option<ChatUsage> }
+#[derive(Deserialize)] struct ChatChoice { message: ChatMessage, finish_reason: Option<String> }
+#[derive(Deserialize)] struct ChatMessage { content: Option<String>, #[serde(default)] tool_calls: Option<Vec<ChatToolCall>> }
+#[derive(Deserialize)] struct ChatToolCall { id: String, #[serde(rename = "type")] call_type: String, function: ChatFunctionCall }
+#[derive(Deserialize)] struct ChatFunctionCall { name: String, arguments: String }
+#[derive(Deserialize)] struct ChatUsage { prompt_tokens: u32, completion_tokens: u32, total_tokens: u32 }
 
 // --- OpenAI-compatible implementation ---
 
@@ -101,36 +111,31 @@ impl OpenAIProvider {
         Err(last_err.unwrap_or_else(|| Error::Custom("max retries exhausted".into())))
     }
 
-    fn parse_response(json: &Value) -> crate::Result<LLMResponse> {
-        let choice = json["choices"].as_array().and_then(|a| a.first())
-            .ok_or_else(|| Error::ApiError { status: 200, body: format!("No choices: {}", json) })?;
-        let msg = &choice["message"];
+    fn parse_response(json: &serde_json::Value) -> crate::Result<LLMResponse> {
+        let resp: ChatResponse = serde_json::from_value(json.clone())?;
+        let choice = resp.choices.into_iter().next()
+            .ok_or_else(|| Error::ApiError { status: 200, body: "No choices in response".into() })?;
         Ok(LLMResponse {
             message: crate::types::AssistantMessage {
-                content: msg["content"].as_str().unwrap_or("").to_string(),
-                tool_calls: if let Some(arr) = msg["tool_calls"].as_array() {
-                    Some(arr.iter().map(|tc| crate::types::ToolCall {
-                        id: tc["id"].as_str().unwrap_or("").to_string(),
-                        call_type: tc["type"].as_str().unwrap_or("function").to_string(),
-                        function: crate::types::FunctionCall {
-                            name: tc["function"]["name"].as_str().unwrap_or("").to_string(),
-                            arguments: tc["function"]["arguments"].as_str().unwrap_or("{}").to_string(),
-                        },
-                    }).collect())
-                } else { None },
+                content: choice.message.content.unwrap_or_default(),
+                tool_calls: choice.message.tool_calls.map(|arr| arr.into_iter().map(|tc| crate::types::ToolCall {
+                    id: tc.id,
+                    call_type: tc.call_type,
+                    function: crate::types::FunctionCall { name: tc.function.name, arguments: tc.function.arguments },
+                }).collect()),
             },
-            finish_reason: match choice["finish_reason"].as_str() {
-                Some("stop") => crate::types::FinishReason::Stop,
-                Some("length") => crate::types::FinishReason::Length,
-                Some("tool_calls") => crate::types::FinishReason::ToolCalls,
-                Some("content_filter") => crate::types::FinishReason::ContentFilter,
-                Some(o) => crate::types::FinishReason::Custom(o.to_string()),
-                None => crate::types::FinishReason::Stop,
+            finish_reason: match choice.finish_reason.as_deref() {
+                Some("stop") => FinishReason::Stop,
+                Some("length") => FinishReason::Length,
+                Some("tool_calls") => FinishReason::ToolCalls,
+                Some("content_filter") => FinishReason::ContentFilter,
+                Some(o) => FinishReason::Custom(o.to_string()),
+                None => FinishReason::Stop,
             },
-            usage: json.get("usage").map(|u| crate::types::TokenUsage {
-                prompt_tokens: u["prompt_tokens"].as_u64().unwrap_or(0) as u32,
-                completion_tokens: u["completion_tokens"].as_u64().unwrap_or(0) as u32,
-                total_tokens: u["total_tokens"].as_u64().unwrap_or(0) as u32,
+            usage: resp.usage.map(|u| crate::types::TokenUsage {
+                prompt_tokens: u.prompt_tokens,
+                completion_tokens: u.completion_tokens,
+                total_tokens: u.total_tokens,
             }),
         })
     }
