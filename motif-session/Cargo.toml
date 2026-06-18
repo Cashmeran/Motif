@@ -1,0 +1,12 @@
+[package]
+name = "motif-session"
+version = "0.1.0"
+edition = "2021"
+description = "File-based session persistence for Motif"
+
+[dependencies]
+motif = { path = "../motif" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = "0.4"
+dirs = "5"

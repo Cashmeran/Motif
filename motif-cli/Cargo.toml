@@ -1,0 +1,20 @@
+[package]
+name = "motif-cli"
+version = "0.1.0"
+edition = "2021"
+description = "CLI for Motif agent"
+
+[[bin]]
+name = "motif"
+path = "src/main.rs"
+
+[dependencies]
+motif = { path = "../motif" }
+motif-tools = { path = "../motif-tools" }
+motif-session = { path = "../motif-session" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rustyline = "15"
+dirs = "5"
+tokio = { version = "1", features = ["full"] }
+async-trait = "0.1"

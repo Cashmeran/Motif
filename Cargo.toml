@@ -1,31 +1,3 @@
 [workspace]
-members = ["macros", "motif-mcp", "motif-skill"]
-
-[package]
-name = "motif"
-version = "0.2.0"
-edition = "2021"
-description = "Minimal, extensible Rust agent core"
-license = "MIT"
-keywords = ["agent", "llm", "ai", "tool-use"]
-categories = ["development-tools", "web-programming"]
-
-[dependencies]
-macros = { path = "./macros" }
-tokio = { version = "1", features = ["full"] }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
-async-trait = "0.1"
-thiserror = "2"
-futures = "0.3"
-schemars = "1"
-tracing = "0.1"
-chrono = "0.4"
-regex = "1"
-rustyline = "15"
-dirs = "5"
-
-[[bin]]
-name = "motif"
-path = "src/cli/motif.rs"
+members = ["macros", "motif", "motif-cli", "motif-tools", "motif-session"]
+resolver = "2"
