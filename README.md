@@ -123,10 +123,28 @@ cargo test                      # 51 mock
 MOTIF_API_KEY=sk-... cargo test -- --ignored   # +13 live
 ```
 
-## 快速开始
+## 安装
+
+**一行命令安装：**
+
+Windows PowerShell:
+```powershell
+irm https://raw.githubusercontent.com/Cashmeran/Motif/main/install.ps1 | iex
+```
+
+Linux / macOS:
+```bash
+curl -fsSL https://raw.githubusercontent.com/Cashmeran/Motif/main/install.sh | bash
+```
+
+**或从源码安装：**
+```bash
+cargo install --git https://github.com/Cashmeran/Motif.git
+```
+
+## 使用
 
 ```bash
-cargo install motif
 motif                        # 首次运行输入 API key，保存至 ~/.motif/config.json
 ```
 
