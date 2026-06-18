@@ -1,5 +1,5 @@
-use crate::error::Error;
-use crate::types::{LLMResponse, TimedMessage, ToolCall, ToolResult};
+use crate::core::error::Error;
+use crate::core::types::{LLMResponse, TimedMessage, ToolCall, ToolResult};
 use async_trait::async_trait;
 
 // --- Context types ---

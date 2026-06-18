@@ -1,4 +1,4 @@
-use crate::types::{Parameters, ToolCall, ToolDefinition, ToolMessage, ToolResult};
+use crate::core::types::{Parameters, ToolCall, ToolDefinition, ToolMessage, ToolResult};
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::future::Future;
@@ -380,7 +380,7 @@ mod tests {
             .execute(vec![ToolCall {
                 id: "call_1".into(),
                 call_type: "function".into(),
-                function: crate::types::FunctionCall {
+                function: crate::core::types::FunctionCall {
                     name: "echo".into(),
                     arguments: r#"{"msg":"hi"}"#.into(),
                 },
@@ -398,7 +398,7 @@ mod tests {
             .execute(vec![ToolCall {
                 id: "call_1".into(),
                 call_type: "function".into(),
-                function: crate::types::FunctionCall {
+                function: crate::core::types::FunctionCall {
                     name: "nonexistent".into(),
                     arguments: "{}".into(),
                 },

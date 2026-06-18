@@ -29,20 +29,17 @@
 //! }
 //! ```
 
-mod agent;
-mod error;
-mod history;
-mod hooks;
-mod prompt;
-mod provider;
-pub mod tool;
-mod types;
+pub mod core;
+pub mod tool {
+    //! Re-export for macro-generated code (`motif::tool::ToolArgs`)
+    pub use crate::core::tool::*;
+}
 
-pub use agent::*;
-pub use error::*;
-pub use history::*;
-pub use hooks::*;
-pub use prompt::*;
-pub use provider::*;
-pub use tool::*;
-pub use types::*;
+pub use core::agent::*;
+pub use core::error::*;
+pub use core::history::*;
+pub use core::hooks::*;
+pub use core::prompt::*;
+pub use core::provider::*;
+pub use core::tool::*;
+pub use core::types::*;

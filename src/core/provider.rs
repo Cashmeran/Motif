@@ -1,5 +1,5 @@
-use crate::error::Error;
-use crate::types::{FinishReason, LLMResponse, LLMStream, Message, StreamEvent, ToolDefinition};
+use crate::core::error::Error;
+use crate::core::types::{FinishReason, LLMResponse, LLMStream, Message, StreamEvent, ToolDefinition};
 use async_trait::async_trait;
 use serde::Deserialize;
 
@@ -173,14 +173,14 @@ impl OpenAIProvider {
                 body: "No choices in response".into(),
             })?;
         Ok(LLMResponse {
-            message: crate::types::AssistantMessage {
+            message: crate::core::types::AssistantMessage {
                 content: choice.message.content.unwrap_or_default(),
                 tool_calls: choice.message.tool_calls.map(|arr| {
                     arr.into_iter()
-                        .map(|tc| crate::types::ToolCall {
+                        .map(|tc| crate::core::types::ToolCall {
                             id: tc.id,
                             call_type: tc.call_type,
-                            function: crate::types::FunctionCall {
+                            function: crate::core::types::FunctionCall {
                                 name: tc.function.name,
                                 arguments: tc.function.arguments,
                             },
@@ -196,7 +196,7 @@ impl OpenAIProvider {
                 Some(o) => FinishReason::Custom(o.to_string()),
                 None => FinishReason::Stop,
             },
-            usage: resp.usage.map(|u| crate::types::TokenUsage {
+            usage: resp.usage.map(|u| crate::core::types::TokenUsage {
                 prompt_tokens: u.prompt_tokens,
                 completion_tokens: u.completion_tokens,
                 total_tokens: u.total_tokens,
@@ -260,7 +260,7 @@ impl LLMProvider for OpenAIProvider {
                     Some(Err(e)) => {
                         tracing::warn!("SSE stream error: {}", e);
                         let _ = tx
-                            .send(StreamEvent::Finish(crate::types::FinishReason::Custom(
+                            .send(StreamEvent::Finish(crate::core::types::FinishReason::Custom(
                                 "stream_error".into(),
                             )))
                             .await;
@@ -279,7 +279,7 @@ impl LLMProvider for OpenAIProvider {
                     }
                     if line == "data: [DONE]" {
                         let _ = tx
-                            .send(StreamEvent::Finish(crate::types::FinishReason::Stop))
+                            .send(StreamEvent::Finish(crate::core::types::FinishReason::Stop))
                             .await;
                         return;
                     }
@@ -294,7 +294,7 @@ impl LLMProvider for OpenAIProvider {
                             }
                             if let Some(r) = json["choices"][0]["finish_reason"].as_str() {
                                 let fr = match r {
-                                    "stop" => crate::types::FinishReason::Stop,
+                                    "stop" => crate::core::types::FinishReason::Stop,
                                     "length" => FinishReason::Length,
                                     "tool_calls" => FinishReason::ToolCalls,
                                     _ => FinishReason::Stop,
@@ -307,7 +307,7 @@ impl LLMProvider for OpenAIProvider {
                 }
             }
             let _ = tx
-                .send(StreamEvent::Finish(crate::types::FinishReason::Stop))
+                .send(StreamEvent::Finish(crate::core::types::FinishReason::Stop))
                 .await;
         });
         Ok(LLMStream { receiver: rx })

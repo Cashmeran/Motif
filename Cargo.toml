@@ -27,4 +27,4 @@ dirs = "5"
 
 [[bin]]
 name = "motif"
-path = "src/main.rs"
+path = "src/bin/motif.rs"

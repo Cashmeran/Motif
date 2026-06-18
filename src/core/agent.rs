@@ -1,9 +1,9 @@
-use crate::history::{History, InfiniteHistory};
-use crate::hooks::{AgentHook, HookContext, RunContext};
-use crate::prompt::{self, Prompt, PromptBuilder};
-use crate::provider::LLMProvider;
-use crate::tool::{Executor, RegisteredTool, ToolExecutor};
-use crate::types::{
+use crate::core::history::{History, InfiniteHistory};
+use crate::core::hooks::{AgentHook, HookContext, RunContext};
+use crate::core::prompt::{self, Prompt, PromptBuilder};
+use crate::core::provider::LLMProvider;
+use crate::core::tool::{Executor, RegisteredTool, ToolExecutor};
+use crate::core::types::{
     FinishReason, LLMResponse, Message, SystemMessage, TimedMessage, ToolDefinition,
 };
 use std::future::Future;
@@ -168,10 +168,10 @@ impl Agent {
     /// Internally builds a `RegisteredTool` and delegates to [`Self::tool`].
     pub fn tool_fn<Args, Fut>(self, f: fn(Args) -> Fut) -> Self
     where
-        Args: crate::tool::ToolArgs + 'static,
+        Args: crate::core::tool::ToolArgs + 'static,
         Fut: Future<Output = String> + Send + 'static,
     {
-        use crate::tool::FunctionTool;
+        use crate::core::tool::FunctionTool;
         self.tool(RegisteredTool {
             definition: Args::definition(),
             tool: Arc::new(FunctionTool::new(move |json: String| {
@@ -191,10 +191,10 @@ impl Agent {
     pub fn bind<T, Args, Fut>(mut self, instance: T, method: fn(T, Args) -> Fut) -> Self
     where
         T: Clone + Send + Sync + 'static,
-        Args: crate::tool::ToolArgs + 'static,
+        Args: crate::core::tool::ToolArgs + 'static,
         Fut: Future<Output = String> + Send + 'static,
     {
-        use crate::tool::FunctionTool;
+        use crate::core::tool::FunctionTool;
         let def = Args::definition();
         let name = def.function.name.clone();
         self.tool_definitions.push(def);
@@ -218,7 +218,7 @@ impl Agent {
         defs: Vec<ToolDefinition>,
         handler: impl Fn(String, String) -> String + Send + Sync + 'static,
     ) -> Self {
-        use crate::tool::FunctionTool;
+        use crate::core::tool::FunctionTool;
         let shared = Arc::new(handler);
         for def in &defs {
             let name = def.function.name.clone();
@@ -500,7 +500,7 @@ impl Agent {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{AssistantMessage, ToolCall};
+    use crate::core::types::{AssistantMessage, ToolCall};
     use async_trait::async_trait;
 
     /// Mock LLM provider for testing — returns canned responses.
@@ -551,7 +551,7 @@ mod tests {
                 tool_calls: Some(vec![ToolCall {
                     id: "call_1".to_string(),
                     call_type: "function".to_string(),
-                    function: crate::types::FunctionCall {
+                    function: crate::core::types::FunctionCall {
                         name: name.to_string(),
                         arguments: args.to_string(),
                     },
@@ -573,7 +573,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_agent_tool_then_text() {
-        use crate::tool::ToolDef;
+        use crate::core::tool::ToolDef;
 
         let provider = MockProvider::new(vec![
             mock_tool_response("echo", r#"{"msg":"hi"}"#),
@@ -596,7 +596,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_stop_condition_on_stuck() {
-        use crate::tool::ToolDef;
+        use crate::core::tool::ToolDef;
 
         // Provider keeps returning the same tool call
         let responses: Vec<LLMResponse> = (0..5)
@@ -667,7 +667,7 @@ mod tests {
         let defs = vec![ToolDefinition::new(
             "ext_search",
             "Search external source",
-            crate::types::Parameters::new(serde_json::json!({
+            crate::core::types::Parameters::new(serde_json::json!({
                 "type": "object",
                 "properties": {
                     "query": {"type": "string", "description": "Search query"}

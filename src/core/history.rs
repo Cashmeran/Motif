@@ -1,4 +1,4 @@
-use crate::types::TimedMessage;
+use crate::core::types::TimedMessage;
 
 /// Manages conversation history. Implementations may be infinite, capped, or
 /// backed by external storage.
@@ -76,7 +76,7 @@ impl History for BoundedHistory {
         let non_sys_count = self
             .messages
             .iter()
-            .filter(|m| !matches!(m.message, crate::types::Message::System(_)))
+            .filter(|m| !matches!(m.message, crate::core::types::Message::System(_)))
             .count();
         let can_evict = non_sys_count.min(excess);
         let mut evicted = 0;
@@ -84,7 +84,7 @@ impl History for BoundedHistory {
             if evicted >= can_evict {
                 return true;
             }
-            if matches!(m.message, crate::types::Message::System(_)) && non_sys_count > 0 {
+            if matches!(m.message, crate::core::types::Message::System(_)) && non_sys_count > 0 {
                 return true;
             }
             evicted += 1;
@@ -104,7 +104,7 @@ impl History for BoundedHistory {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::Message;
+    use crate::core::types::Message;
 
     #[test]
     fn test_infinite_history_add_and_retrieve() {
