@@ -9,6 +9,6 @@ if (!(Get-Command cargo -ErrorAction SilentlyContinue)) {
     exit 1
 }
 
-cargo install --git https://github.com/Cashmeran/Motif.git
+cargo install --git https://github.com/Cashmeran/Motif.git motif-cli
 
 Write-Host "✓ Motif installed. Run 'motif' to start." -ForegroundColor Green

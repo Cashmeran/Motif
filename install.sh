@@ -11,6 +11,6 @@ if ! command -v cargo &>/dev/null; then
     exit 1
 fi
 
-cargo install --git https://github.com/Cashmeran/Motif.git
+cargo install --git https://github.com/Cashmeran/Motif.git motif-cli
 
 echo "✓ Motif installed. Run 'motif' to start."
