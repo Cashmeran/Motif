@@ -200,7 +200,7 @@ async fn test_stop_condition_after_n_tools() {
         .tool(ping)
         .stop_when(StopCondition::AfterNTools(2));
 
-    let result = agent.chat("ping repeatedly").await.unwrap();
+    let _result = agent.chat("ping repeatedly").await.unwrap();
     // AfterNTools(2): stops when 2 tool results recorded.
     // Returns the content of the 2nd assistant message.
     let history = agent.history_ref().get_all();
@@ -595,11 +595,11 @@ async fn test_multi_round_conversation() {
     ]);
     let mut agent = Agent::new(provider);
     let r1 = agent.chat("Hi").await.unwrap();
-    assert!(r1.len() > 0);
+    assert!(!r1.is_empty());
     let r2 = agent.chat("Can you help?").await.unwrap();
-    assert!(r2.len() > 0);
+    assert!(!r2.is_empty());
     let r3 = agent.chat("Thanks").await.unwrap();
-    assert!(r3.len() > 0);
+    assert!(!r3.is_empty());
     // All three rounds in history
     let h = agent.history_ref().get_all();
     let user_msgs: Vec<_> = h
@@ -749,7 +749,7 @@ async fn test_many_tools_registered() {
     let provider = SeqProvider::new(responses);
     let mut agent = Agent::new(provider);
     for i in 0..10 {
-        let tool = ToolDef::new(&format!("tool{}", i), &format!("Tool number {}", i))
+        let tool = ToolDef::new(format!("tool{}", i), format!("Tool number {}", i))
             .build(move |_args: String| async move { format!("result{}", i) });
         agent = agent.tool(tool);
     }

@@ -19,11 +19,18 @@ struct Config {
     #[serde(default = "default_model")]
     model: String,
 }
-fn default_base_url() -> String { DEFAULT_BASE_URL.into() }
-fn default_model() -> String { DEFAULT_MODEL.into() }
+fn default_base_url() -> String {
+    DEFAULT_BASE_URL.into()
+}
+fn default_model() -> String {
+    DEFAULT_MODEL.into()
+}
 
 fn config_path() -> PathBuf {
-    dirs::home_dir().unwrap_or_default().join(".motif").join("config.json")
+    dirs::home_dir()
+        .unwrap_or_default()
+        .join(".motif")
+        .join("config.json")
 }
 
 fn load_or_create_config() -> Config {
@@ -59,7 +66,11 @@ fn load_or_create_config() -> Config {
         std::process::exit(1);
     }
 
-    let cfg = Config { api_key: key, base_url: DEFAULT_BASE_URL.into(), model: DEFAULT_MODEL.into() };
+    let cfg = Config {
+        api_key: key,
+        base_url: DEFAULT_BASE_URL.into(),
+        model: DEFAULT_MODEL.into(),
+    };
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).ok();
     }
@@ -90,13 +101,28 @@ async fn main() {
         match editor.readline("> ") {
             Ok(line) => {
                 let line = line.trim().to_string();
-                if line.is_empty() { continue; }
-                if line == "/exit" || line == "/quit" { break; }
-                if line == "/clear" { agent = make_agent(&cfg); println!("Session cleared."); continue; }
-                if line == "/help" { println!("Commands: /help /clear /exit"); continue; }
+                if line.is_empty() {
+                    continue;
+                }
+                if line == "/exit" || line == "/quit" {
+                    break;
+                }
+                if line == "/clear" {
+                    agent = make_agent(&cfg);
+                    println!("Session cleared.");
+                    continue;
+                }
+                if line == "/help" {
+                    println!("Commands: /help /clear /exit");
+                    continue;
+                }
                 if line == "/status" {
-                    println!("Tokens used: {} | History: {} messages | Model: {}",
-                        agent.total_tokens_used(), agent.history_ref().get_all().len(), cfg.model);
+                    println!(
+                        "Tokens used: {} | History: {} messages | Model: {}",
+                        agent.total_tokens_used(),
+                        agent.history_ref().get_all().len(),
+                        cfg.model
+                    );
                     continue;
                 }
 
@@ -126,13 +152,8 @@ async fn main() {
     }
 }
 
-fn new_agent(base_url: &str, api_key: &str, model: &str) -> Agent {
-    let provider = OpenAIProvider::new(base_url.to_string(), api_key.to_string(), model.to_string());
-    Agent::new(provider).model(model).max_iterations(100)
-}
-
 fn make_agent(cfg: &Config) -> Agent {
-    let provider = OpenAIProvider::new(
-        cfg.base_url.clone(), cfg.api_key.clone(), cfg.model.clone());
+    let provider =
+        OpenAIProvider::new(cfg.base_url.clone(), cfg.api_key.clone(), cfg.model.clone());
     Agent::new(provider).model(&cfg.model).max_iterations(100)
 }

@@ -15,6 +15,9 @@ fn normalize_json(json: &str) -> String {
         .unwrap_or_else(|_| json.to_string())
 }
 
+/// Predicate fn for StopCondition::Custom.
+pub type StopPredicate = Arc<dyn Fn(&LLMResponse, &[TimedMessage]) -> bool + Send + Sync>;
+
 // --- StopCondition ---
 
 /// Determines when the agent loop should terminate.
@@ -30,9 +33,8 @@ pub enum StopCondition {
     /// Never stop automatically — caller controls the loop via `step()`.
     Never,
     /// Custom predicate: receives LLM response and full history.
-    Custom(Arc<dyn Fn(&LLMResponse, &[TimedMessage]) -> bool + Send + Sync>),
+    Custom(StopPredicate),
 }
-
 
 impl StopCondition {
     fn should_stop(

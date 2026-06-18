@@ -214,14 +214,14 @@ fn expand_impl_method_parts(method: &ImplItemFn) -> (TokenStream2, TokenStream2)
 
 // ============ helpers ============
 
-fn param_data<'a>(
-    params: &[&'a syn::PatType],
-) -> (
+type ParamData<'a> = (
     Vec<&'a Ident>,
     Vec<&'a syn::Type>,
     Vec<Vec<TokenStream2>>,
     Vec<String>,
-) {
+);
+
+fn param_data<'a>(params: &[&'a syn::PatType]) -> ParamData<'a> {
     let mut names = Vec::new();
     let mut types = Vec::new();
     let mut attrs_tokens = Vec::new();
