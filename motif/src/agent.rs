@@ -422,6 +422,20 @@ impl Agent {
         false
     }
 
+    /// Run exit cleanup: fire after_run then on_finally for all hooks.
+    async fn exit_cleanup(&self, run_ctx: &mut RunContext) {
+        for hook in &self.hooks {
+            if let Err(e) = hook.after_run(run_ctx).await {
+                tracing::warn!("Hook.after_run error: {}", e);
+            }
+        }
+        for hook in &self.hooks {
+            if let Err(e) = hook.on_finally(run_ctx).await {
+                tracing::warn!("Hook.on_finally error: {}", e);
+            }
+        }
+    }
+
     /// Run the agent loop until the stop condition is met.
     pub async fn run(&mut self) -> crate::Result<String> {
         let mut run_ctx = RunContext::new();
@@ -442,20 +456,10 @@ impl Agent {
                     .collect();
                 let fallback = drained
                     .last()
-                    .and_then(|tm| {
-                        if let Message::Assistant(ref a) = tm.message {
-                            Some(a.content.clone())
-                        } else {
-                            None
-                        }
-                    })
+                    .and_then(|tm| if let Message::Assistant(ref a) = tm.message { Some(a.content.clone()) } else { None })
                     .unwrap_or_else(|| "Max iterations reached".to_string());
                 run_ctx.final_content = Some(fallback.clone());
-                for hook in &self.hooks {
-                    if let Err(e) = hook.after_run(&mut run_ctx).await {
-                        tracing::warn!("Hook.after_run error: {}", e);
-                    }
-                }
+                self.exit_cleanup(&mut run_ctx).await;
                 return Ok(fallback);
             }
             iterations += 1;
@@ -467,11 +471,7 @@ impl Agent {
                         finalized = hook.finalize_content(&finalized);
                     }
                     run_ctx.final_content = Some(finalized.clone());
-                    for hook in &self.hooks {
-                        if let Err(e) = hook.after_run(&mut run_ctx).await {
-                            tracing::warn!("Hook.after_run error: {}", e);
-                        }
-                    }
+                    self.exit_cleanup(&mut run_ctx).await;
                     return Ok(finalized);
                 }
                 Ok(None) => continue,
@@ -482,11 +482,7 @@ impl Agent {
                         let _ = hook.on_error(&mut error_ctx, &e).await;
                     }
                     run_ctx.error = Some(e.clone());
-                    for hook in &self.hooks {
-                        if let Err(e2) = hook.after_run(&mut run_ctx).await {
-                            tracing::warn!("Hook.after_run error: {}", e2);
-                        }
-                    }
+                    self.exit_cleanup(&mut run_ctx).await;
                     return Err(e);
                 }
             }

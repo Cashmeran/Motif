@@ -107,6 +107,12 @@ pub trait AgentHook: Send + Sync {
         Ok(())
     }
 
+    // --- Finally ---
+    /// Guaranteed to be called when `run()` exits, regardless of success,
+    /// error, or max_iterations. Use for resource cleanup (flush buffers,
+    /// close connections, save state).
+    async fn on_finally(&self, _ctx: &mut RunContext) -> crate::Result<()> { Ok(()) }
+
     // --- Content post-processing ---
     fn finalize_content(&self, content: &str) -> String {
         content.to_string()
