@@ -93,7 +93,7 @@ pub fn make_agent(cfg: &Config) -> motif::Agent {
     let mut agent = Agent::new(provider)
         .history(motif_session::FileHistory::new(None))
         .model(&cfg.model)
-        .max_iterations(100)
+        .max_iterations(200)
         .tool(motif_tools::search::register())
         .tool(motif_tools::read::register())
         .tool(motif_tools::write::register())

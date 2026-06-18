@@ -104,7 +104,7 @@ impl Agent {
             model: String::new(),
             stop_condition: StopCondition::default(),
             recent_tool_calls: vec![],
-            max_iterations: 100,
+            max_iterations: 200,
             empty_retries: 0,
             max_empty_retries: 2,
             length_continues: 0,
