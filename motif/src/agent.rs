@@ -497,7 +497,13 @@ impl Agent {
         self.run().await
     }
 
-    /// Send a user message with streaming output.
+    /// Whether any hook explicitly disabled streaming. True if all hooks agree.
+    pub fn wants_streaming(&self) -> bool {
+        self.hooks.iter().all(|h| h.wants_streaming())
+    }
+
+    /// Send a user message with streaming output. Falls back to non-streaming
+    /// if any hook opts out via `wants_streaming()`.
     pub async fn chat_stream(&mut self, content: impl Into<String>) -> crate::Result<String> {
         let content = content.into();
         let ctx = prompt::runtime_context(&self.model);
