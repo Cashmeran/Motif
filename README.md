@@ -110,16 +110,26 @@ agent.bind(db, Database::query);
 
 ```
 src/
-├── agent.rs      Agent loop + step/run/chat + 5 种 StopCondition
-├── provider.rs   LLMProvider trait + OpenAIProvider + retry + SSE streaming
-├── tool.rs       Tool trait + Executor + ConcurrencySafety + ToolDef
-├── history.rs    History trait + InfiniteHistory + BoundedHistory
-├── prompt.rs     3 层缓存 Prompt + PromptBuilder trait
-├── hooks.rs      AgentHook (9 方法，错误隔离)
-├── types.rs      Message, ToolCall, LLMResponse, TokenUsage
-├── error.rs      Error 枚举
-├── lib.rs        公共 API 导出
-└── main.rs       CLI
+├── core/           ← 9 文件（不动）
+│   ├── agent.rs      Agent + step/run/chat + 5 种 StopCondition
+│   ├── provider.rs   LLMProvider trait + OpenAIProvider + retry + streaming
+│   ├── tool.rs       Tool trait + Executor + ConcurrencySafety + ToolDef
+│   ├── history.rs    History trait + InfiniteHistory + FileHistory + Bounded
+│   ├── prompt.rs     3 层缓存 Prompt + PromptBuilder trait
+│   ├── hooks.rs      AgentHook (9 方法)
+│   ├── types.rs      Message, ToolCall, LLMResponse, TokenUsage
+│   └── error.rs      Error 枚举
+├── cli/            ← CLI（随便改）
+│   ├── cmd/          5 个命令 (/clear, /help, /list, /load, /status)
+│   ├── commands.rs   命令注册表
+│   ├── config.rs     配置加载 + agent 创建
+│   └── keybind.rs    快捷键骨架
+├── tools/          ← 内建工具（可选）
+│   ├── search.rs     grep + glob 合一
+│   ├── read.rs       文件读取
+│   ├── write.rs      文件写入
+│   └── bash.rs       命令执行
+└── lib.rs
 ```
 
 ## 对比（轻量级 Agent 框架）
@@ -139,10 +149,10 @@ src/
 
 ## 测试
 
-51 mock + 13 live（真实 DeepSeek API 调用）。零 unsafe。
+72 mock + 13 live（真实 DeepSeek API 调用）。零 unsafe。
 
 ```bash
-cargo test                                    # 51 mock
+cargo test                                    # 72 mock
 MOTIF_API_KEY=sk-... cargo test -- --ignored  # +13 live
 ```
 

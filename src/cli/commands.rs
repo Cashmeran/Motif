@@ -7,7 +7,7 @@ use std::collections::HashMap;
 
 pub enum Outcome {
     Continue,
-    Exit,
+    #[allow(dead_code)] Exit,
     PassToAgent(String),
 }
 
