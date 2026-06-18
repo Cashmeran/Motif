@@ -24,7 +24,11 @@ impl History for BoundedHistory {
         if excess == 0 { return; }
         let ns = self.messages.iter().filter(|m| !matches!(m.message, crate::types::Message::System(_))).count();
         let can = ns.min(excess); let mut ev = 0;
-        self.messages.retain(|m| { if ev >= can { true } else if matches!(m.message, crate::types::Message::System(_)) && ns > 0 { true } else { ev += 1; false } });
+        self.messages.retain(|m| {
+            if ev >= can { return true; }
+            if matches!(m.message, crate::types::Message::System(_)) && ns > 0 { return true; }
+            ev += 1; false
+        });
     }
     fn get_all(&self) -> &[TimedMessage] { &self.messages }
     fn clear(&mut self) { self.messages.clear(); }

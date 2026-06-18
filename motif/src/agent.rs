@@ -166,7 +166,7 @@ impl Agent {
 
     /// Shorthand: register a `#[tool]`-annotated function directly.
     /// Internally builds a `RegisteredTool` and delegates to [`Self::tool`].
-    pub fn tool_fn<Args, Fut>(mut self, f: fn(Args) -> Fut) -> Self
+    pub fn tool_fn<Args, Fut>(self, f: fn(Args) -> Fut) -> Self
     where
         Args: crate::tool::ToolArgs + 'static,
         Fut: Future<Output = String> + Send + 'static,
