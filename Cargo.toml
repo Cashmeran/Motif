@@ -23,6 +23,7 @@ schemars = "1"
 tracing = "0.1"
 chrono = "0.4"
 rustyline = "15"
+dirs = "5"
 
 [[bin]]
 name = "motif"

@@ -1,32 +1,88 @@
-//! Motif CLI — terminal chat interface.
-//!
-//! Usage:
-//!   MOTIF_API_KEY=sk-... motif                    # DeepSeek (default)
-//!   MOTIF_BASE_URL=https://api.openai.com/v1 \
-//!   MOTIF_MODEL=gpt-4o MOTIF_API_KEY=sk-... motif # OpenAI
+//! Motif CLI — terminal chat interface. Configuration is read from
+//! `~/.motif/config.json` on first launch, falling back to env vars.
 
 use motif::*;
 use rustyline::{error::ReadlineError, DefaultEditor};
+use serde::{Deserialize, Serialize};
 use std::env;
+use std::io::Write;
+use std::path::PathBuf;
 
 const DEFAULT_BASE_URL: &str = "https://api.deepseek.com/v1";
 const DEFAULT_MODEL: &str = "deepseek-chat";
 
+#[derive(Serialize, Deserialize)]
+struct Config {
+    api_key: String,
+    #[serde(default = "default_base_url")]
+    base_url: String,
+    #[serde(default = "default_model")]
+    model: String,
+}
+fn default_base_url() -> String { DEFAULT_BASE_URL.into() }
+fn default_model() -> String { DEFAULT_MODEL.into() }
+
+fn config_path() -> PathBuf {
+    dirs::home_dir().unwrap_or_default().join(".motif").join("config.json")
+}
+
+fn load_or_create_config() -> Config {
+    let path = config_path();
+
+    // 1. Try config file
+    if path.exists() {
+        if let Ok(data) = std::fs::read_to_string(&path) {
+            if let Ok(cfg) = serde_json::from_str::<Config>(&data) {
+                return cfg;
+            }
+        }
+    }
+
+    // 2. Try env vars
+    if let Ok(key) = env::var("MOTIF_API_KEY") {
+        return Config {
+            api_key: key,
+            base_url: env::var("MOTIF_BASE_URL").unwrap_or_else(|_| DEFAULT_BASE_URL.into()),
+            model: env::var("MOTIF_MODEL").unwrap_or_else(|_| DEFAULT_MODEL.into()),
+        };
+    }
+
+    // 3. Prompt and save
+    eprint!("Enter your API key: ");
+    std::io::stderr().flush().ok();
+    let mut key = String::new();
+    std::io::stdin().read_line(&mut key).ok();
+    let key = key.trim().to_string();
+
+    if key.is_empty() {
+        eprintln!("No API key provided. Set MOTIF_API_KEY or create ~/.motif/config.json");
+        std::process::exit(1);
+    }
+
+    let cfg = Config { api_key: key, base_url: DEFAULT_BASE_URL.into(), model: DEFAULT_MODEL.into() };
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).ok();
+    }
+    if let Ok(json) = serde_json::to_string_pretty(&cfg) {
+        if std::fs::write(&path, &json).is_ok() {
+            // Restrict config file to owner-only (API key inside)
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).ok();
+            }
+            eprintln!("Config saved to {}", path.display());
+        }
+    }
+    cfg
+}
+
 #[tokio::main]
 async fn main() {
-    let api_key = env::var("MOTIF_API_KEY").unwrap_or_else(|_| {
-        eprintln!("MOTIF_API_KEY not set. Export it or pass as env var.");
-        std::process::exit(1);
-    });
-    let base_url = env::var("MOTIF_BASE_URL").unwrap_or_else(|_| DEFAULT_BASE_URL.to_string());
-    let model = env::var("MOTIF_MODEL").unwrap_or_else(|_| DEFAULT_MODEL.to_string());
+    let cfg = load_or_create_config();
+    let mut agent = make_agent(&cfg);
 
-    let provider = OpenAIProvider::new(&base_url, &api_key, &model);
-    let mut agent = Agent::new(provider)
-        .model(&model)
-        .max_iterations(100);
-
-    println!("Motif CLI · model: {} · /help /clear /exit", model);
+    println!("Motif CLI · model: {} · /help /clear /exit", cfg.model);
 
     let mut editor = DefaultEditor::new().expect("Failed to init line editor");
 
@@ -36,11 +92,11 @@ async fn main() {
                 let line = line.trim().to_string();
                 if line.is_empty() { continue; }
                 if line == "/exit" || line == "/quit" { break; }
-                if line == "/clear" { agent = new_agent(&base_url, &api_key, &model); println!("Session cleared."); continue; }
+                if line == "/clear" { agent = make_agent(&cfg); println!("Session cleared."); continue; }
                 if line == "/help" { println!("Commands: /help /clear /exit"); continue; }
                 if line == "/status" {
                     println!("Tokens used: {} | History: {} messages | Model: {}",
-                        agent.total_tokens_used(), agent.history_ref().get_all().len(), model);
+                        agent.total_tokens_used(), agent.history_ref().get_all().len(), cfg.model);
                     continue;
                 }
 
@@ -71,6 +127,12 @@ async fn main() {
 }
 
 fn new_agent(base_url: &str, api_key: &str, model: &str) -> Agent {
-    let provider = OpenAIProvider::new(base_url, api_key, model);
+    let provider = OpenAIProvider::new(base_url.to_string(), api_key.to_string(), model.to_string());
     Agent::new(provider).model(model).max_iterations(100)
+}
+
+fn make_agent(cfg: &Config) -> Agent {
+    let provider = OpenAIProvider::new(
+        cfg.base_url.clone(), cfg.api_key.clone(), cfg.model.clone());
+    Agent::new(provider).model(&cfg.model).max_iterations(100)
 }
