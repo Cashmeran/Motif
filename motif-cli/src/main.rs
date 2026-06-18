@@ -28,7 +28,12 @@ async fn main() {
                     Outcome::Exit => break,
                     Outcome::PassToAgent(text) => {
                         let _ = editor.add_history_entry(&text);
-                        match agent.chat_stream(&text).await {
+                        let result = if cfg.streaming.unwrap_or(true) {
+                            agent.chat_stream(&text).await
+                        } else {
+                            agent.chat(&text).await
+                        };
+                        match result {
                             Ok(r) => println!("\n{}\n", r),
                             Err(e) => eprintln!("Error: {}", e),
                         }

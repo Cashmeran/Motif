@@ -16,6 +16,7 @@ pub struct Config {
     #[serde(default = "default_model")]
     pub model: String,
     #[serde(default)]
+    pub streaming: Option<bool>,
     pub thinking_effort: Option<String>,
     #[serde(default)]
     pub extra_body: Option<serde_json::Map<String, serde_json::Value>>,
@@ -43,6 +44,7 @@ pub fn load_or_create() -> Config {
             base_url: env::var("MOTIF_BASE_URL").unwrap_or_else(|_| DEFAULT_BASE_URL.into()),
             model: env::var("MOTIF_MODEL").unwrap_or_else(|_| DEFAULT_MODEL.into()),
             thinking_effort: env::var("MOTIF_THINKING_EFFORT").ok(),
+            streaming: Some(true),
             extra_body: None,
         };
     }
@@ -62,6 +64,7 @@ pub fn load_or_create() -> Config {
         base_url: DEFAULT_BASE_URL.into(),
         model: DEFAULT_MODEL.into(),
         thinking_effort: None,
+        streaming: Some(true),
         extra_body: None,
     };
     if let Some(parent) = path.parent() { std::fs::create_dir_all(parent).ok(); }
