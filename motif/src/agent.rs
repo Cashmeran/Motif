@@ -548,6 +548,13 @@ impl Agent {
                         }
                         full_content.push_str(&delta);
                     }
+                    crate::types::StreamEvent::Thinking(delta) => {
+                        for hook in &self.hooks {
+                            if let Err(e) = hook.on_reasoning_delta(&delta).await {
+                                tracing::warn!("Hook.on_reasoning_delta error: {}", e);
+                            }
+                        }
+                    }
                     crate::types::StreamEvent::Finish(reason) => {
                         finish_reason = reason;
                         break;
@@ -564,6 +571,15 @@ impl Agent {
             };
 
             if let Some(ref usage) = response.usage { self.total_tokens += usage.total_tokens as u64; }
+
+            // Signal end of streaming phase
+            let has_tools = response.message.tool_calls.as_ref().is_some_and(|c| !c.is_empty());
+            for hook in &self.hooks {
+                if let Err(e) = hook.on_stream_end(has_tools).await {
+                    tracing::warn!("Hook.on_stream_end error: {}", e);
+                }
+            }
+
             self.history.add(TimedMessage {
                 message: Message::Assistant(response.message.clone()),
                 timestamp: std::time::SystemTime::now(), elapsed,

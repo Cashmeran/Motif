@@ -134,6 +134,8 @@ pub struct LLMStream {
 pub enum StreamEvent {
     /// Text content delta.
     Content(String),
+    /// Thinking/reasoning delta (DeepSeek thinking mode).
+    Thinking(String),
     /// Streaming has finished with the given reason.
     Finish(FinishReason),
 }

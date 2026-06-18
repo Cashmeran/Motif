@@ -85,8 +85,21 @@ pub trait AgentHook: Send + Sync {
     }
 
     // --- Stream ---
+    /// Whether this hook wants streaming output. Return false to opt out.
+    /// All hooks must agree (no veto); one `false` doesn't disable streaming for others.
+    fn wants_streaming(&self) -> bool { true }
+
     /// Called for each content delta during streaming. Default no-op.
     async fn on_stream_delta(&self, _delta: &str) -> crate::Result<()> { Ok(()) }
+
+    /// Called when a streaming phase ends.
+    /// `resuming: true` means tool calls follow (show spinner).
+    /// `resuming: false` means this is the final response.
+    async fn on_stream_end(&self, _resuming: bool) -> crate::Result<()> { Ok(()) }
+
+    // --- Reasoning (DeepSeek thinking mode) ---
+    /// Called for reasoning content deltas during streaming (thinking mode only).
+    async fn on_reasoning_delta(&self, _delta: &str) -> crate::Result<()> { Ok(()) }
 
     // --- Message-level ---
     /// Called before a message is appended to history. Return `Ok(false)` to discard.

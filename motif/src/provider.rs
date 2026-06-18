@@ -429,7 +429,10 @@ impl LLMProvider for OpenAIProvider {
                     }
                     if let Some(data) = line.strip_prefix("data: ") {
                         if let Ok(json) = serde_json::from_str::<serde_json::Value>(data) {
-                            if let Some(c) = json["choices"][0]["delta"]["content"].as_str() {
+                            if let Some(r) = json["choices"][0]["delta"]["reasoning_content"].as_str() {
+                            if !r.is_empty() { if tx.send(StreamEvent::Thinking(r.to_string())).await.is_err() { return; } }
+                        }
+                        if let Some(c) = json["choices"][0]["delta"]["content"].as_str() {
                                 if !c.is_empty()
                                     && tx.send(StreamEvent::Content(c.to_string())).await.is_err()
                                 {
