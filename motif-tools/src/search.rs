@@ -259,7 +259,9 @@ async fn search_filenames(
     out
 }
 
-/// Simple glob match supporting *, ?, and {a,b,c} brace expansion.
+/// Simple glob match supporting *, **, ?, and {a,b,c} brace expansion.
+/// - `*` matches within a single path component (no `/`)
+/// - `**` matches across directory boundaries (including `/`)
 fn simple_glob_match(pattern: &str, name: &str) -> bool {
     let name = name.to_lowercase();
     let pattern = pattern.to_lowercase();
@@ -273,14 +275,34 @@ fn simple_glob_match(pattern: &str, name: &str) -> bool {
             return false;
         }
     }
-    // Simple glob: replace * with regex .*, ? with .
+    // Convert glob to regex: **/ → (.*/)?, ** → .*, * → [^/]*, ? → [^/]
     let mut regex = String::from("^");
-    for ch in pattern.chars() {
-        match ch {
-            '*' => regex.push_str(".*"),
-            '?' => regex.push('.'),
-            c if c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '.' || c == '/' => regex.push(c),
-            _ => regex.push_str(&regex::escape(&ch.to_string())),
+    let chars: Vec<char> = pattern.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        if chars[i] == '*' && i + 1 < chars.len() && chars[i + 1] == '*' {
+            // **: cross-directory globstar
+            if i + 2 < chars.len() && chars[i + 2] == '/' {
+                // **/ — match zero or more directory levels
+                regex.push_str("(.*/)?");
+                i += 3;
+            } else {
+                // bare ** (at end of pattern) — match everything
+                regex.push_str(".*");
+                i += 2;
+            }
+        } else if chars[i] == '*' {
+            regex.push_str("[^/]*");
+            i += 1;
+        } else if chars[i] == '?' {
+            regex.push_str("[^/]");
+            i += 1;
+        } else if chars[i].is_ascii_alphanumeric() || chars[i] == '_' || chars[i] == '-' || chars[i] == '.' || chars[i] == '/' {
+            regex.push(chars[i]);
+            i += 1;
+        } else {
+            regex.push_str(&regex::escape(&chars[i].to_string()));
+            i += 1;
         }
     }
     regex.push('$');
@@ -288,9 +310,18 @@ fn simple_glob_match(pattern: &str, name: &str) -> bool {
 }
 
 /// Check if a file path matches an optional glob filter.
+/// Simple patterns (no `/` or `**`) match against filename only.
+/// Path-aware patterns (with `/` or `**`) match against the full path.
 fn glob_matches(p: &Path, glob: Option<&str>) -> bool {
     match glob {
-        Some(g) => simple_glob_match(g, &p.display().to_string()),
+        Some(g) => {
+            if g.contains('/') || g.contains("**") {
+                simple_glob_match(g, &p.display().to_string())
+            } else {
+                let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                simple_glob_match(g, name)
+            }
+        }
         None => true,
     }
 }

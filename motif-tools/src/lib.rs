@@ -1,6 +1,7 @@
 pub mod bash;
 pub mod edit;
 pub mod read;
+pub(crate) mod read_state;
 pub mod search;
 pub mod web_fetch;
 pub mod write;

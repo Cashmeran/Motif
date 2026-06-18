@@ -42,15 +42,17 @@ fn bash_impl(args: String) -> std::pin::Pin<Box<dyn std::future::Future<Output =
         let command = v["command"].as_str().unwrap_or("").to_string();
         if command.is_empty() { return "Error: 'command' is required".to_string(); }
 
-        // Security: check destructive patterns
+        // Security: check destructive patterns (case-insensitive substring)
         let cmd_lower = command.to_lowercase();
         for sub in DESTRUCTIVE_SUBSTRINGS {
             if cmd_lower.contains(sub) {
-                return format!(
-                    "Destructive command pattern detected: '{}'. If intentional, use a safer alternative or adjust the script. To override, edit DESTRUCTIVE_SUBSTRINGS.",
-                    sub
-                );
+                return format!("Destructive pattern '{}' blocked.", sub);
             }
+        }
+
+        // Security: detect unquoted shell metacharacters (CC/Aegis L2 pattern)
+        if let Some(issue) = detect_unquoted_metachars(&command) {
+            return issue;
         }
 
         let timeout_ms = v["timeout_ms"].as_u64().unwrap_or(DEFAULT_TIMEOUT_MS).min(MAX_TIMEOUT_MS);
@@ -128,6 +130,49 @@ fn truncate_str(s: &str, max_chars: usize) -> String {
     let mut t = s[..max_chars].to_string();
     t.push_str("\n(truncated)");
     t
+}
+
+/// Walk the command char-by-char tracking quote state.
+/// Returns `Some(error_message)` if an unquoted metacharacter is found
+/// (CC bashSecurity.ts + Aegis security.rs L2 pattern).
+fn detect_unquoted_metachars(command: &str) -> Option<String> {
+    let mut in_single = false;
+    let mut in_double = false;
+    let mut escaped = false;
+    let bytes = command.as_bytes();
+
+    for (i, ch) in command.char_indices() {
+        if escaped { escaped = false; continue; }
+        if ch == '\\' && !in_single { escaped = true; continue; }
+        if ch == '\'' && !in_double { in_single = !in_single; continue; }
+        if ch == '"' && !in_single { in_double = !in_double; continue; }
+        if in_single { continue; }
+
+        // Unquoted `$` followed by identifier/brace/paren/?
+        if ch == '$' {
+            if let Some(&next) = bytes.get(i + ch.len_utf8()) {
+                if next == b'(' || next == b'{'
+                    || next.is_ascii_alphabetic() || next == b'_'
+                    || next == b'?' || next == b'#' || next == b'@'
+                    || next == b'*' || next == b'!'
+                {
+                    return Some("Unquoted shell expansion ($VAR / $(cmd) / ${}) is not allowed.".to_string());
+                }
+            }
+        }
+
+        // Unquoted backtick (command substitution)
+        if ch == '`' {
+            return Some("Backtick command substitution is not allowed.".to_string());
+        }
+
+        // Unquoted glob characters (outside double quotes)
+        if !in_double && (ch == '?' || ch == '*') {
+            // Allow `*` in simple contexts (e.g., `ls *.rs` is read-only-like), but flag it
+            return Some("Unquoted glob character is not allowed. Use explicit file names or a grep/glob tool instead.".to_string());
+        }
+    }
+    None
 }
 
 // Helper to write without importing std::fmt::Write

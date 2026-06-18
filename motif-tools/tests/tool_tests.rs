@@ -225,7 +225,10 @@ fn test_search_multiline_regex() {
 #[test]
 fn test_edit_basic_replace() {
     fs::write("test_edit.txt", "Hello World").unwrap();
+    let (_, r_tool) = read::register().into_parts();
     let (_, tool) = edit::register().into_parts();
+    // Read first to satisfy read-before-edit enforcement
+    let _ = call_tool(&r_tool, r#"{"file_path":"test_edit.txt"}"#);
     let result = call_tool(&tool, r#"{"file_path":"test_edit.txt","old_string":"World","new_string":"Rust"}"#);
     assert!(result.contains("Edited"), "Got: {}", result);
     let content = fs::read_to_string("test_edit.txt").unwrap();
@@ -236,7 +239,9 @@ fn test_edit_basic_replace() {
 #[test]
 fn test_edit_duplicate_old_string() {
     fs::write("test_edit_dup.txt", "A B A").unwrap();
+    let (_, r_tool) = read::register().into_parts();
     let (_, tool) = edit::register().into_parts();
+    let _ = call_tool(&r_tool, r#"{"file_path":"test_edit_dup.txt"}"#);
     let result = call_tool(&tool, r#"{"file_path":"test_edit_dup.txt","old_string":"A","new_string":"X"}"#);
     assert!(result.contains("appears 2 times"), "Got: {}", result);
     fs::remove_file("test_edit_dup.txt").ok();
@@ -245,7 +250,9 @@ fn test_edit_duplicate_old_string() {
 #[test]
 fn test_edit_replace_all() {
     fs::write("test_edit_all.txt", "A B A").unwrap();
+    let (_, r_tool) = read::register().into_parts();
     let (_, tool) = edit::register().into_parts();
+    let _ = call_tool(&r_tool, r#"{"file_path":"test_edit_all.txt"}"#);
     let result = call_tool(&tool, r#"{"file_path":"test_edit_all.txt","old_string":"A","new_string":"X","replace_all":true}"#);
     assert!(result.contains("Replaced 2"), "Got: {}", result);
     fs::remove_file("test_edit_all.txt").ok();
@@ -254,7 +261,9 @@ fn test_edit_replace_all() {
 #[test]
 fn test_edit_not_found() {
     fs::write("test_edit_nf.txt", "hello").unwrap();
+    let (_, r_tool) = read::register().into_parts();
     let (_, tool) = edit::register().into_parts();
+    let _ = call_tool(&r_tool, r#"{"file_path":"test_edit_nf.txt"}"#);
     let result = call_tool(&tool, r#"{"file_path":"test_edit_nf.txt","old_string":"world","new_string":"x"}"#);
     assert!(result.contains("not found"), "Got: {}", result);
     fs::remove_file("test_edit_nf.txt").ok();
@@ -263,7 +272,9 @@ fn test_edit_not_found() {
 #[test]
 fn test_edit_idempotent() {
     fs::write("test_edit_same.txt", "same").unwrap();
+    let (_, r_tool) = read::register().into_parts();
     let (_, tool) = edit::register().into_parts();
+    let _ = call_tool(&r_tool, r#"{"file_path":"test_edit_same.txt"}"#);
     let result = call_tool(&tool, r#"{"file_path":"test_edit_same.txt","old_string":"same","new_string":"same"}"#);
     assert!(result.contains("identical"), "Got: {}", result);
     fs::remove_file("test_edit_same.txt").ok();

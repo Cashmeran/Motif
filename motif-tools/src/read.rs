@@ -2,6 +2,7 @@
 
 use motif::RegisteredTool;
 use motif::ToolDef;
+use crate::read_state;
 use crate::PROTECTED_FILES;
 use std::fmt::Write as _;
 use std::path::Path;
@@ -63,6 +64,11 @@ fn read_impl(args: String) -> std::pin::Pin<Box<dyn std::future::Future<Output =
             Ok(c) => c,
             Err(e) => return format!("Error reading file: {}", e),
         };
+
+        // Record read for read-before-edit enforcement
+        if let Ok(mtime) = meta.modified() {
+            read_state::record_read(&file_path, &content, mtime);
+        }
 
         let offset = v["offset"].as_u64().unwrap_or(0) as usize;
         let limit = v["limit"].as_u64().unwrap_or(MAX_LINES as u64) as usize;

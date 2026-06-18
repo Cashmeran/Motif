@@ -3,6 +3,7 @@
 
 use motif::RegisteredTool;
 use motif::ToolDef;
+use crate::read_state;
 
 const MAX_FILE_SIZE: u64 = 1_048_576; // 1 MiB (Aegis default)
 const MAX_OLD_STRING_LEN: usize = 10_000;
@@ -32,6 +33,11 @@ fn edit_impl(args: String) -> std::pin::Pin<Box<dyn std::future::Future<Output =
 
         // Safety: path traversal
         if file_path.contains("..") { return "Path traversal not allowed".to_string(); }
+
+        // Read-before-edit enforcement
+        if let Err(e) = read_state::check_read(&file_path) {
+            return e;
+        }
 
         // Safety: file size
         let meta = match std::fs::metadata(&file_path) {

@@ -2,6 +2,7 @@
 
 use motif::RegisteredTool;
 use motif::ToolDef;
+use crate::read_state;
 use crate::PROTECTED_FILES;
 use std::path::Path;
 
@@ -33,6 +34,13 @@ fn write_impl(args: String) -> std::pin::Pin<Box<dyn std::future::Future<Output 
         // Safety: path traversal
         if file_path.contains("..") {
             return "Path traversal not allowed".to_string();
+        }
+
+        // Read-before-write enforcement (only for existing files)
+        if path.exists() {
+            if let Err(e) = read_state::check_read(&file_path) {
+                return e;
+            }
         }
 
         // Size limit

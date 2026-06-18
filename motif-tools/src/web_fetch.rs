@@ -49,6 +49,12 @@ fn web_fetch_impl(args: String) -> std::pin::Pin<Box<dyn std::future::Future<Out
                 return format!("Cross-domain redirect blocked: {} → {}", url, final_url);
             }
         }
+        // SSRF: block resolves to private IP (nanobot pattern)
+        if let Some(addr) = response.remote_addr() {
+            if is_private_ip(&addr.ip()) {
+                return format!("SSRF blocked: resolved to private IP {}", addr.ip());
+            }
+        }
         if !status.is_success() {
             return format!("HTTP {} {}", status.as_u16(), status.canonical_reason().unwrap_or(""));
         }
@@ -75,6 +81,13 @@ fn content_type_dispatch(bytes: &[u8]) -> String {
     };
 
     if text.len() > MAX_CONTENT_BYTES { format!("{}...(truncated)", &text[..MAX_CONTENT_BYTES]) } else { text }
+}
+
+fn is_private_ip(ip: &std::net::IpAddr) -> bool {
+    match ip {
+        std::net::IpAddr::V4(v4) => v4.is_loopback() || v4.is_private() || v4.is_link_local(),
+        std::net::IpAddr::V6(v6) => v6.is_loopback(),
+    }
 }
 
 fn html_to_text(html: &str) -> String {
