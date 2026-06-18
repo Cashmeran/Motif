@@ -22,3 +22,13 @@ futures = "0.3"
 schemars = "1"
 tracing = "0.1"
 chrono = "0.4"
+rustyline = { version = "15", optional = true }
+
+[features]
+default = []
+cli = ["rustyline"]
+
+[[bin]]
+name = "motif"
+required-features = ["cli"]
+path = "src/main.rs"
