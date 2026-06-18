@@ -294,18 +294,7 @@ impl Agent {
             elapsed,
         };
         // Hook: on_message — filter messages before history
-        let keep = {
-            let mut ok = true;
-            for hook in &self.hooks {
-                match hook.on_message(&assoc_msg).await {
-                    Ok(false) => ok = false,
-                    Err(e) => tracing::warn!("Hook.on_message error: {}", e),
-                    _ => {}
-                }
-            }
-            ok
-        };
-        if keep {
+        if self.filter_message(&assoc_msg).await {
             self.history.add(assoc_msg.clone());
             hook_ctx.messages.push(assoc_msg);
         }
@@ -356,8 +345,11 @@ impl Agent {
                         timestamp: result.timestamp,
                         elapsed: result.elapsed,
                     };
-                    self.history.add(msg.clone());
-                    hook_ctx.messages.push(msg);
+                    let keep = self.filter_message(&msg).await;
+                    if keep {
+                        self.history.add(msg.clone());
+                        hook_ctx.messages.push(msg);
+                    }
                 }
             }
         }
@@ -397,8 +389,8 @@ impl Agent {
         if matches!(response.finish_reason, FinishReason::Length) {
             if !is_empty && self.length_continues < self.max_length_continues {
                 self.length_continues += 1;
-                self.history
-                    .add(TimedMessage::new(Message::user("continue")));
+                let msg = TimedMessage::new(Message::user("continue"));
+                if self.filter_message(&msg).await { self.history.add(msg); }
                 return true;
             }
         } else {
@@ -413,6 +405,19 @@ impl Agent {
             self.empty_retries = 0;
         }
         false
+    }
+
+    /// Run on_message hooks for a message. Returns false if any hook rejects it.
+    async fn filter_message(&self, msg: &TimedMessage) -> bool {
+        let mut ok = true;
+        for hook in &self.hooks {
+            match hook.on_message(msg).await {
+                Ok(false) => ok = false,
+                Err(e) => tracing::warn!("Hook.on_message error: {}", e),
+                _ => {}
+            }
+        }
+        ok
     }
 
     /// Run exit cleanup: fire after_run then on_finally for all hooks.
@@ -487,18 +492,18 @@ impl Agent {
         let content = content.into();
         let ctx = prompt::runtime_context(&self.model);
         let full = if content.is_empty() { ctx } else { format!("{}\n{}", ctx, content) };
-        self.history.add(TimedMessage::new(Message::user(full)));
+        let msg = TimedMessage::new(Message::user(full));
+        if self.filter_message(&msg).await { self.history.add(msg); }
         self.run().await
     }
 
-    /// Send a user message with streaming output. Each content delta is
-    /// forwarded to `on_stream_delta` hooks. Returns the complete response
-    /// (same as `chat()`).
+    /// Send a user message with streaming output.
     pub async fn chat_stream(&mut self, content: impl Into<String>) -> crate::Result<String> {
         let content = content.into();
         let ctx = prompt::runtime_context(&self.model);
         let full = if content.is_empty() { ctx } else { format!("{}\n{}", ctx, content) };
-        self.history.add(TimedMessage::new(Message::user(full)));
+        let msg = TimedMessage::new(Message::user(full));
+        if self.filter_message(&msg).await { self.history.add(msg); }
         self.run_stream().await
     }
 
@@ -580,10 +585,11 @@ impl Agent {
                 }
             }
 
-            self.history.add(TimedMessage {
+            let assoc = TimedMessage {
                 message: Message::Assistant(response.message.clone()),
                 timestamp: std::time::SystemTime::now(), elapsed,
-            });
+            };
+            if self.filter_message(&assoc).await { self.history.add(assoc); }
             hook_ctx.response = Some(response.clone());
 
             // Execute tools if any
@@ -596,10 +602,11 @@ impl Agent {
                     let results = self.executor.execute(calls.clone()).await;
                     hook_ctx.tool_results = results.clone();
                     for result in &results {
-                        self.history.add(TimedMessage {
+                        let tm = TimedMessage {
                             message: Message::Tool(result.tool_message.clone()),
                             timestamp: result.timestamp, elapsed: result.elapsed,
-                        });
+                        };
+                        if self.filter_message(&tm).await { self.history.add(tm); }
                     }
                     for hook in &self.hooks {
                         if let Err(e) = hook.after_tools(&mut hook_ctx).await { tracing::warn!("Hook.after_tools error: {}", e); }
