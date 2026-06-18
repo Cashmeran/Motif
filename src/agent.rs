@@ -334,7 +334,22 @@ impl Agent {
             }
         }
 
-        // Empty response retry / Length continuation (check Length first)
+        // Recovery: Length continuation or empty retry
+        if self.try_recover(&response).await {
+            return Ok(None);
+        }
+
+        // Check stop condition
+        if self.stop_condition.should_stop(&response, self.history.get_all(), &self.recent_tool_calls) {
+            return Ok(Some(response.message.content));
+        }
+
+        Ok(None)
+    }
+
+    /// Handle Length truncation (inject "continue") or empty response (retry).
+    /// Returns true if the loop should continue (recovery was triggered).
+    async fn try_recover(&mut self, response: &LLMResponse) -> bool {
         let is_empty = response.message.content.trim().is_empty();
         let has_tools = response.message.tool_calls.as_ref().map_or(false, |c| !c.is_empty());
 
@@ -342,33 +357,16 @@ impl Agent {
             if !is_empty && self.length_continues < self.max_length_continues {
                 self.length_continues += 1;
                 self.history.add(TimedMessage::new(Message::user("continue")));
-                tracing::debug!("Length finish, continuing ({}/{})", self.length_continues, self.max_length_continues);
-                return Ok(None);
+                return true;
             }
-        } else {
-            self.length_continues = 0;
-        }
+        } else { self.length_continues = 0; }
 
-        if is_empty && !has_tools {
-            if self.empty_retries < self.max_empty_retries {
-                self.empty_retries += 1;
-                tracing::debug!("Empty response (retry {}/{}), continuing", self.empty_retries, self.max_empty_retries);
-                return Ok(None);
-            }
-        } else {
-            self.empty_retries = 0;
+        if is_empty && !has_tools && self.empty_retries < self.max_empty_retries {
+            self.empty_retries += 1;
+            return true;
         }
-
-        // Check stop condition
-        if self.stop_condition.should_stop(
-            &response,
-            self.history.get_all(),
-            &self.recent_tool_calls,
-        ) {
-            return Ok(Some(response.message.content));
-        }
-
-        Ok(None)
+        if !is_empty || has_tools { self.empty_retries = 0; }
+        false
     }
 
     /// Run the agent loop until the stop condition is met.

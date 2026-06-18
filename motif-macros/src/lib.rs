@@ -66,6 +66,19 @@ fn expand_fn(input: ItemFn, tool_attr: ToolAttr) -> TokenStream2 {
         return quote! { compile_error!("#[tool] requires an async function"); };
     }
 
+    // Validate return type is String
+    match &input.sig.output {
+        ReturnType::Type(_, ty) => {
+            let ty_str = quote!(#ty).to_string();
+            if ty_str != "String" {
+                return quote! { compile_error!("#[tool] must return String"); };
+            }
+        }
+        ReturnType::Default => {
+            return quote! { compile_error!("#[tool] must return String"); };
+        }
+    }
+
     let ret_ty = ret_type(&input.sig.output);
     quote! {
         #[derive(serde::Deserialize, schemars::JsonSchema, Clone, Debug)]

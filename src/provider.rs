@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use crate::types::{LLMResponse, LLMStream, Message, StreamEvent, ToolDefinition};
+use crate::types::{FinishReason, LLMResponse, LLMStream, Message, StreamEvent, ToolDefinition};
 use crate::error::Error;
 
 /// LLM Provider abstraction with streaming support.
@@ -73,7 +73,8 @@ impl OpenAIProvider {
     /// Set max retry attempts for transient errors (default 2).
     pub fn with_retry(mut self, max: usize) -> Self { self.max_retries = max; self }
 
-    async fn call_with_retry(&self, body: &serde_json::Value) -> crate::Result<LLMResponse> {
+    /// Send a POST with retry. On success returns the reqwest Response for parsing.
+    async fn post_with_retry(&self, body: &serde_json::Value) -> crate::Result<reqwest::Response> {
         let url = format!("{}/chat/completions", self.base_url);
         let mut last_err = None;
         for attempt in 0..=self.max_retries {
@@ -91,44 +92,47 @@ impl OpenAIProvider {
             let status = response.status();
             if !status.is_success() {
                 let code = status.as_u16();
-                if code == 429 || code >= 500 { last_err = Some(Error::ApiError { status: code, body: response.text().await.unwrap_or_default() }); continue; }
-                return Err(Error::ApiError { status: code, body: response.text().await.unwrap_or_default() });
+                let body = response.text().await.unwrap_or_default();
+                if code == 429 || code >= 500 { last_err = Some(Error::ApiError { status: code, body }); continue; }
+                return Err(Error::ApiError { status: code, body });
             }
-            let json: Value = response.json().await?;
-            let choice = json["choices"].as_array().and_then(|a| a.first()).ok_or_else(|| Error::ApiError { status: 200, body: format!("No choices: {}", json) })?;
-            let msg = &choice["message"];
-            let usage = json.get("usage").map(|u| crate::types::TokenUsage {
+            return Ok(response);
+        }
+        Err(last_err.unwrap_or_else(|| Error::Custom("max retries exhausted".into())))
+    }
+
+    fn parse_response(json: &Value) -> crate::Result<LLMResponse> {
+        let choice = json["choices"].as_array().and_then(|a| a.first())
+            .ok_or_else(|| Error::ApiError { status: 200, body: format!("No choices: {}", json) })?;
+        let msg = &choice["message"];
+        Ok(LLMResponse {
+            message: crate::types::AssistantMessage {
+                content: msg["content"].as_str().unwrap_or("").to_string(),
+                tool_calls: if let Some(arr) = msg["tool_calls"].as_array() {
+                    Some(arr.iter().map(|tc| crate::types::ToolCall {
+                        id: tc["id"].as_str().unwrap_or("").to_string(),
+                        call_type: tc["type"].as_str().unwrap_or("function").to_string(),
+                        function: crate::types::FunctionCall {
+                            name: tc["function"]["name"].as_str().unwrap_or("").to_string(),
+                            arguments: tc["function"]["arguments"].as_str().unwrap_or("{}").to_string(),
+                        },
+                    }).collect())
+                } else { None },
+            },
+            finish_reason: match choice["finish_reason"].as_str() {
+                Some("stop") => crate::types::FinishReason::Stop,
+                Some("length") => crate::types::FinishReason::Length,
+                Some("tool_calls") => crate::types::FinishReason::ToolCalls,
+                Some("content_filter") => crate::types::FinishReason::ContentFilter,
+                Some(o) => crate::types::FinishReason::Custom(o.to_string()),
+                None => crate::types::FinishReason::Stop,
+            },
+            usage: json.get("usage").map(|u| crate::types::TokenUsage {
                 prompt_tokens: u["prompt_tokens"].as_u64().unwrap_or(0) as u32,
                 completion_tokens: u["completion_tokens"].as_u64().unwrap_or(0) as u32,
                 total_tokens: u["total_tokens"].as_u64().unwrap_or(0) as u32,
-            });
-
-            return Ok(LLMResponse {
-                message: crate::types::AssistantMessage {
-                    content: msg["content"].as_str().unwrap_or("").to_string(),
-                    tool_calls: if let Some(arr) = msg["tool_calls"].as_array() {
-                        Some(arr.iter().map(|tc| crate::types::ToolCall {
-                            id: tc["id"].as_str().unwrap_or("").to_string(),
-                            call_type: tc["type"].as_str().unwrap_or("function").to_string(),
-                            function: crate::types::FunctionCall {
-                                name: tc["function"]["name"].as_str().unwrap_or("").to_string(),
-                                arguments: tc["function"]["arguments"].as_str().unwrap_or("{}").to_string(),
-                            },
-                        }).collect())
-                    } else { None },
-                },
-                finish_reason: match choice["finish_reason"].as_str() {
-                    Some("stop") => crate::types::FinishReason::Stop,
-                    Some("length") => crate::types::FinishReason::Length,
-                    Some("tool_calls") => crate::types::FinishReason::ToolCalls,
-                    Some("content_filter") => crate::types::FinishReason::ContentFilter,
-                    Some(o) => crate::types::FinishReason::Custom(o.to_string()),
-                    None => crate::types::FinishReason::Stop,
-                },
-                usage,
-            });
-        }
-        Err(last_err.unwrap_or_else(|| Error::Custom("max retries exhausted".into())))
+            }),
+        })
     }
 
     fn build_request_body(&self, messages: &[Message], tools: &[ToolDefinition], stream: bool) -> serde_json::Value {
@@ -145,122 +149,54 @@ impl OpenAIProvider {
 
 #[async_trait]
 impl LLMProvider for OpenAIProvider {
-    async fn call(
-        &self,
-        messages: &[Message],
-        tools: &[ToolDefinition],
-    ) -> crate::Result<LLMResponse> {
+    async fn call(&self, messages: &[Message], tools: &[ToolDefinition]) -> crate::Result<LLMResponse> {
         let body = self.build_request_body(messages, tools, false);
-        self.call_with_retry(&body).await
+        let response = self.post_with_retry(&body).await?;
+        let json: Value = response.json().await?;
+        Self::parse_response(&json)
     }
 
-    async fn call_stream(
-        &self,
-        messages: &[Message],
-        tools: &[ToolDefinition],
-    ) -> crate::Result<LLMStream> {
-        let url = format!("{}/chat/completions", self.base_url);
+    async fn call_stream(&self, messages: &[Message], tools: &[ToolDefinition]) -> crate::Result<LLMStream> {
         let body = self.build_request_body(messages, tools, true);
-
+        let response = self.post_with_retry(&body).await?;
         let (tx, rx) = tokio::sync::mpsc::channel(64);
-
-        // Retry loop for transient errors
-        let max_retries = self.max_retries;
-        let retry_delay_ms = self.retry_delay_ms;
-        let client = self.client.clone();
-        let api_key = self.api_key.clone();
 
         tokio::spawn(async move {
             use futures::StreamExt;
-            let mut last_err: Option<crate::Error> = None;
+            let mut stream = response.bytes_stream();
+            let mut buf: Vec<u8> = Vec::new();
 
-            for attempt in 0..=max_retries {
-                if attempt > 0 {
-                    tokio::time::sleep(std::time::Duration::from_millis(retry_delay_ms * attempt as u64)).await;
-                }
-
-                let response = match client.post(&url)
-                    .header("Authorization", format!("Bearer {}", &api_key))
-                    .header("Content-Type", "application/json")
-                    .json(&body)
-                    .send()
-                    .await
-                {
-                    Ok(r) => r,
-                    Err(e) => { last_err = Some(e.into()); continue; }
-                };
-
-                let status = response.status();
-                if !status.is_success() {
-                    let code = status.as_u16();
-                    if code == 429 || code >= 500 {
-                        last_err = Some(Error::ApiError { status: code, body: response.text().await.unwrap_or_default() });
-                        continue;
+            loop {
+                match stream.next().await {
+                    Some(Ok(bytes)) => buf.extend_from_slice(&bytes),
+                    Some(Err(e)) => {
+                        tracing::warn!("SSE stream error: {}", e);
+                        let _ = tx.send(StreamEvent::Finish(crate::types::FinishReason::Custom("stream_error".into()))).await;
+                        return;
                     }
-                    last_err = Some(Error::ApiError { status: code, body: response.text().await.unwrap_or_default() });
-                    break;
+                    None => break,
                 }
-
-                // Stream the response
-                let mut stream = response.bytes_stream();
-                let mut buf: Vec<u8> = Vec::new();
-
-                loop {
-                    let item = stream.next().await;
-                    match item {
-                        Some(Ok(bytes)) => buf.extend_from_slice(&bytes),
-                        Some(Err(e)) => {
-                            tracing::warn!("SSE stream error: {}", e);
-                            let _ = tx.send(StreamEvent::Finish(crate::types::FinishReason::Custom("stream_error".into()))).await;
-                            return;
-                        }
-                        None => break,
-                    }
-
-                    // Process complete lines from byte buffer
-                    while let Some(pos) = buf.iter().position(|&b| b == b'\n') {
-                        let line_bytes = &buf[..pos];
-                        let line = std::str::from_utf8(line_bytes).unwrap_or("").trim().to_string();
-                        buf = buf[pos + 1..].to_vec();
-
-                        if line.is_empty() || line.starts_with(':') { continue; }
-                        if line == "data: [DONE]" {
-                            let _ = tx.send(StreamEvent::Finish(crate::types::FinishReason::Stop)).await;
-                            return;
-                        }
-                        if let Some(data) = line.strip_prefix("data: ") {
-                            if let Ok(json) = serde_json::from_str::<serde_json::Value>(data) {
-                                let choice = &json["choices"][0];
-                                let delta = &choice["delta"];
-                                if let Some(content) = delta["content"].as_str() {
-                                    if !content.is_empty() {
-                                        if tx.send(StreamEvent::Content(content.to_string())).await.is_err() { return; }
-                                    }
-                                }
-                                if let Some(reason) = choice["finish_reason"].as_str() {
-                                    let fr = match reason {
-                                        "stop" => crate::types::FinishReason::Stop,
-                                        "length" => crate::types::FinishReason::Length,
-                                        "tool_calls" => crate::types::FinishReason::ToolCalls,
-                                        _ => crate::types::FinishReason::Stop,
-                                    };
-                                    let _ = tx.send(StreamEvent::Finish(fr)).await;
-                                    return;
-                                }
+                while let Some(pos) = buf.iter().position(|&b| b == b'\n') {
+                    let line = std::str::from_utf8(&buf[..pos]).unwrap_or("").trim().to_string();
+                    buf = buf[pos + 1..].to_vec();
+                    if line.is_empty() || line.starts_with(':') { continue; }
+                    if line == "data: [DONE]" { let _ = tx.send(StreamEvent::Finish(crate::types::FinishReason::Stop)).await; return; }
+                    if let Some(data) = line.strip_prefix("data: ") {
+                        if let Ok(json) = serde_json::from_str::<serde_json::Value>(data) {
+                            if let Some(c) = json["choices"][0]["delta"]["content"].as_str() {
+                                if !c.is_empty() { if tx.send(StreamEvent::Content(c.to_string())).await.is_err() { return; } }
+                            }
+                            if let Some(r) = json["choices"][0]["finish_reason"].as_str() {
+                                let fr = match r { "stop" => crate::types::FinishReason::Stop, "length" => FinishReason::Length, "tool_calls" => FinishReason::ToolCalls, _ => FinishReason::Stop };
+                                let _ = tx.send(StreamEvent::Finish(fr)).await;
+                                return;
                             }
                         }
                     }
                 }
-                // Stream ended normally
-                let _ = tx.send(StreamEvent::Finish(crate::types::FinishReason::Stop)).await;
-                return;
             }
-            // All retries exhausted
-            let _ = tx.send(StreamEvent::Finish(crate::types::FinishReason::Custom(
-                format!("stream_error: {}", last_err.unwrap_or_else(|| crate::Error::Custom("max retries".into())))
-            ))).await;
+            let _ = tx.send(StreamEvent::Finish(crate::types::FinishReason::Stop)).await;
         });
-
         Ok(LLMStream { receiver: rx })
     }
 }

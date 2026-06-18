@@ -67,11 +67,16 @@ impl History for BoundedHistory {
         let excess = self.messages.len().saturating_sub(self.capacity);
         if excess == 0 { return; }
         // Drop oldest non-system messages. System messages are pinned.
-        let mut removed = 0;
+        // If ALL messages are system, drop from the front anyway.
+        let non_sys_count = self.messages.iter()
+            .filter(|m| !matches!(m.message, crate::types::Message::System(_)))
+            .count();
+        let can_evict = non_sys_count.min(excess);
+        let mut evicted = 0;
         self.messages.retain(|m| {
-            if removed >= excess { return true; }
-            if matches!(m.message, crate::types::Message::System(_)) { return true; }
-            removed += 1;
+            if evicted >= can_evict { return true; }
+            if matches!(m.message, crate::types::Message::System(_)) && non_sys_count > 0 { return true; }
+            evicted += 1;
             false
         });
     }
