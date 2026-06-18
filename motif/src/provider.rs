@@ -167,8 +167,8 @@ impl OpenAIProvider {
         Err(last_err.unwrap_or_else(|| Error::Custom("max retries exhausted".into())))
     }
 
-    fn parse_response(json: &serde_json::Value) -> crate::Result<LLMResponse> {
-        let resp: ChatResponse = serde_json::from_value(json.clone())?;
+    fn parse_response(json: serde_json::Value) -> crate::Result<LLMResponse> {
+        let resp: ChatResponse = serde_json::from_value(json)?;
         let choice = resp
             .choices
             .into_iter()
@@ -242,7 +242,7 @@ impl LLMProvider for OpenAIProvider {
         let body = self.build_request_body(messages, tools, false);
         let response = self.post_with_retry(&body).await?;
         let json: Value = response.json().await?;
-        Self::parse_response(&json)
+        Self::parse_response(json)
     }
 
     async fn call_stream(

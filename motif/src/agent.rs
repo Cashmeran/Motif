@@ -166,7 +166,7 @@ impl Agent {
 
     /// Shorthand: register a `#[tool]`-annotated function directly.
     /// Internally builds a `RegisteredTool` and delegates to [`Self::tool`].
-    pub fn tool_fn<Args, Fut>(self, f: fn(Args) -> Fut) -> Self
+    pub fn tool_fn<Args, Fut>(mut self, f: fn(Args) -> Fut) -> Self
     where
         Args: crate::tool::ToolArgs + 'static,
         Fut: Future<Output = String> + Send + 'static,
@@ -266,7 +266,7 @@ impl Agent {
             turn_messages.push(timed.message.clone());
         }
 
-        // Hook: before_llm (error-isolated — one failing hook won't block others)
+        // Hook: before_llm
         self.step_count += 1;
         let mut hook_ctx = HookContext::new(self.step_count, self.history.get_all().to_vec());
         for hook in &self.hooks {

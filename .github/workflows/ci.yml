@@ -23,14 +23,17 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: |
-            . -> target
-            motif-macros -> target
+            motif -> target
+            motif-cli -> target
+            motif-tools -> target
+            motif-session -> target
+            macros -> target
 
       - name: Check formatting
         run: cargo fmt --all --check
 
       - name: Clippy
-        run: cargo clippy --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets -- -D warnings
 
       - name: Test
-        run: cargo test --all-targets
+        run: cargo test --workspace --all-targets
