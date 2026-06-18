@@ -29,11 +29,13 @@
 //! }
 //! ```
 
-pub mod core;
+mod core;
+
 pub mod tool {
-    //! Re-export for macro-generated code (`motif::tool::ToolArgs`)
     pub use crate::core::tool::*;
 }
+
+pub mod tools;
 
 pub use core::agent::*;
 pub use core::error::*;

@@ -6,7 +6,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 // Re-export the proc macro so users can do `use motif::tool;`
-pub use motif_macros::tool;
+pub use macros::tool;
 
 // --- Tool trait ---
 

@@ -1,5 +1,5 @@
 [workspace]
-members = ["motif-macros"]
+members = ["macros"]
 
 [package]
 name = "motif"
@@ -11,7 +11,7 @@ keywords = ["agent", "llm", "ai", "tool-use"]
 categories = ["development-tools", "web-programming"]
 
 [dependencies]
-motif-macros = { path = "./motif-macros" }
+macros = { path = "./macros" }
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -22,9 +22,10 @@ futures = "0.3"
 schemars = "1"
 tracing = "0.1"
 chrono = "0.4"
+regex = "1"
 rustyline = "15"
 dirs = "5"
 
 [[bin]]
 name = "motif"
-path = "src/bin/motif.rs"
+path = "src/cli/motif.rs"
