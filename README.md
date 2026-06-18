@@ -1,6 +1,6 @@
 # Motif
 
-A Rust agent core in 2,500 lines. Library-first. Trait-isolated. Ships with a CLI.
+2500 行的 Rust agent 核心。库优先，全 trait 注入，带 CLI。
 
 ```bash
 cargo install motif
@@ -12,7 +12,7 @@ use motif::*;
 
 #[tool]
 async fn search(query: String) -> String {
-    format!("Results for {}", query)
+    format!("搜索 {} 的结果", query)
 }
 
 let mut agent = Agent::new(OpenAIProvider::new(
@@ -21,53 +21,53 @@ let mut agent = Agent::new(OpenAIProvider::new(
 .model("deepseek-chat")
 .tool_fn(search);
 
-let response = agent.chat("Search Rust agent frameworks").await?;
+let response = agent.chat("搜索 Rust agent 框架").await?;
 ```
 
-## What is this
+## 这是什么
 
-Motif is the loop, the tools, the history, and the prompt. Nothing else.
+Motif 只做一件事：循环、工具、历史、提示词。别的什么都不做。
 
-No built-in file operations. No code search. No memory system. No web UI. Each of those is a separate crate (or a 20-line `PromptBuilder` impl) that depends on Motif, not the other way around.
+没有内建文件操作。没有代码搜索。没有记忆系统。没有 Web UI。这些每个都是独立的 crate（或者一个 20 行的 `PromptBuilder` 实现），依赖 Motif 而不是反过来。
 
-The core is 9 source files. You can read all of them in under an hour.
+核心 9 个源文件，一小时能读完。
 
-## What makes it different
+## 独特之处
 
-### 1. Stop conditions are a configurable policy — not hardcoded
+### 1. 终止条件是可配置策略——不是硬编码
 
-`OnText` (finish without tool calls), `AfterNTools` (N tool results), `OnStuck` (same call repeated), `Never` (you drive the loop), and `Custom` (your predicate).
+`OnText`（无工具调用时停）、`AfterNTools`（N 条工具结果后停）、`OnStuck`（重复相同调用时停）、`Never`（你自己控制循环）、`Custom`（你的谓词）。
 
 ```rust
-// A verification loop without touching the core:
+// 不加核心代码，实现验证循环：
 agent.stop_when(StopCondition::Custom(Arc::new(|resp, _history| {
-    resp.message.content.contains("VERIFIED")
+    resp.message.content.contains("通过验证")
 })));
 ```
 
-No other lightweight agent has this. tiny-loop hardcodes the exit condition. nanobot runs until max iterations. Aegis exits on text or error. Motif lets you define what "done" means.
+没有其他轻量 agent 做到了这一点。tiny-loop 硬编码了退出条件。nanobot 跑到 max_iterations 为止。Aegis 文本或出错就退出。Motif 让你自己定义"完成"是什么。
 
-### 2. Nine lifecycle hooks — all of them are no-ops until you need them
+### 2. 九个生命周期 Hook——全是空操作，直到你需要
 
-`before_llm`, `after_llm`, `before_tools`, `after_tools`, `before_run`, `after_run`, `on_error`, `on_stream_delta`, `finalize_content`.
+`before_llm`、`after_llm`、`before_tools`、`after_tools`、`before_run`、`after_run`、`on_error`、`on_stream_delta`、`finalize_content`。
 
-Want logging? `before_llm` + `tracing`. Want memory injection? `before_llm` + your retrieval code. Want post-processing? `finalize_content`. Each hook is a one-liner. Error isolation by default — one hook failing doesn't block the others.
+要日志？`before_llm` + `tracing`。要记忆注入？`before_llm` + 检索。要后处理？`finalize_content`。一个 Hook 报错不影响其他。
 
-### 3. The prompt is 3 layers, each cached independently
+### 3. 提示词是 3 层，各自独立缓存
 
-L0 (identity) is 9 sections — Meta, Identity, Rhythm, Voice, Honesty, Safety, Tool Use, Hallucination, Execution. Fingerprint-cached. L1 (tools JSON) sits on top, rebuilt when tools change. L2 (PromptBuilder extensions) is per-turn. Date goes in the user message, not the prompt — keeps L0+L1 cache-stable.
+L0（身份）是 9 节——元规则、角色、节奏、语调、诚实、安全、工具使用、幻觉预防、执行纪律。指纹缓存。L1（工具 JSON）搭在上面，工具变化时重建。L2（PromptBuilder 扩展）每轮动态。日期放用户消息里，不动系统提示——保 L0+L1 缓存稳定。
 
-### 4. Every dependency is a trait. Swap any of them.
+### 4. 所有依赖都是 trait，全部可替换
 
-| trait | what you'd replace it with |
-|-------|--------------------------|
-| `LLMProvider` | Anthropic, Ollama, a mock, a router |
-| `History` | capped, SQLite-backed, token-aware |
-| `Tool` / `ToolExecutor` | sandboxed, remote, MCP bridge |
-| `AgentHook` | logging, memory, guardrails |
-| `PromptBuilder` | file tree, git status, skill list |
+| trait | 你会换成什么 |
+|-------|------------|
+| `LLMProvider` | Anthropic、Ollama、mock、路由器 |
+| `History` | 有界、SQLite、token 感知 |
+| `Tool` / `ToolExecutor` | 沙箱、远程、MCP 桥 |
+| `AgentHook` | 日志、记忆、安全护栏 |
+| `PromptBuilder` | 文件树、git 状态、技能列表 |
 
-### 5. `#[tool]` macros on functions, methods, and impl blocks
+### 5. `#[tool]` 宏支持函数、方法和 impl 块
 
 ```rust
 #[tool]
@@ -82,57 +82,57 @@ agent.tool_fn(weather);
 agent.bind(db, Database::query);
 ```
 
-Schema generation is automatic — doc comments become JSON descriptions, types become parameters.
+Schema 自动生成——doc 注释变成 JSON 描述，类型变成参数。
 
-## Architecture
+## 架构
 
 ```
 src/
-├── agent.rs      Agent loop + step()/run()/chat() + 5 stop conditions
-├── provider.rs   LLMProvider trait + OpenAIProvider + retry + SSE streaming
+├── agent.rs      Agent 循环 + step()/run()/chat() + 5 种终止条件
+├── provider.rs   LLMProvider trait + OpenAIProvider + 重试 + SSE 流
 ├── tool.rs       Tool trait + Executor + ConcurrencySafety + ToolDef
 ├── history.rs    History trait + InfiniteHistory + BoundedHistory
-├── prompt.rs     3-layer cached prompt + PromptBuilder trait
-├── hooks.rs      AgentHook (9 methods, error-isolated)
-├── types.rs      Message, ToolCall, LLMResponse, TokenUsage
-├── error.rs      Error enum
-├── lib.rs        Re-exports
-└── main.rs       CLI binary
+├── prompt.rs     3 层缓存提示词 + PromptBuilder trait
+├── hooks.rs      AgentHook（9 个方法，错误隔离）
+├── types.rs      Message、ToolCall、LLMResponse、TokenUsage
+├── error.rs      Error 枚举
+├── lib.rs        重新导出
+└── main.rs       CLI 二进制文件
 ```
 
-## Comparison
+## 对比
 
 | | Motif | tiny-loop | nanobot | Aegis |
 |---|-------|-----------|---------|-------|
-| Language | Rust | Rust | Python | Rust |
-| Core size | ~2,500 lines | ~920 lines | ~15,000 lines | ~165,000 lines |
-| Stop conditions | 5 configurable | 1 hardcoded | 1 hardcoded | 1 hardcoded |
-| Hooks | 9 methods | none | 12 methods | none |
-| Tool macro | `#[tool]` on fn/impl | `#[tool]` on fn | decorator | manual trait |
-| Prompt caching | 3-layer fingerprint | none | Jinja2 (no cache) | 3-layer SHA256 |
-| Provider retry | 429/5xx | none | 3 modes | yes |
-| Trait injection | all 6 core types | provider+tool+history | plugin system | 40-param constructor |
-| CLI | built-in | examples/ | gateway | built-in |
+| 语言 | Rust | Rust | Python | Rust |
+| 核心大小 | ~2,500 行 | ~920 行 | ~15,000 行 | ~165,000 行 |
+| 终止条件 | 5 种可配置 | 1 种硬编码 | 1 种硬编码 | 1 种硬编码 |
+| Hook | 9 个方法 | 无 | 12 个方法 | 无 |
+| 工具宏 | `#[tool]` fn/impl | `#[tool]` fn | decorator | 手动 trait |
+| 提示词缓存 | 3 层指纹 | 无 | Jinja2（不缓存） | 3 层 SHA256 |
+| Provider 重试 | 429/5xx | 无 | 3 种模式 | 有 |
+| Trait 注入 | 全部 6 个核心 | provider+tool+history | 插件系统 | 40 参数构造器 |
+| CLI | 内建 | examples/ | gateway | 内建 |
 
-## Tests
+## 测试
 
-51 mock + 13 live (real DeepSeek API). Zero unsafe.
+51 mock + 13 live（真实 DeepSeek API）。零 unsafe。
 
 ```bash
-cargo test                  # 51 mock
+cargo test                      # 51 mock
 MOTIF_API_KEY=sk-... cargo test -- --ignored   # +13 live
 ```
 
-## Quick start
+## 快速开始
 
 ```bash
 cargo install motif
-motif                    # first run: enter your API key, saved to ~/.motif/config.json
+motif                        # 首次运行输入 API key，保存至 ~/.motif/config.json
 ```
 
-Then just talk.
+直接对话。
 
-To use a different provider, edit `~/.motif/config.json`:
+换 provider 就编辑 `~/.motif/config.json`：
 
 ```json
 {
