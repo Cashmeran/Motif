@@ -104,7 +104,7 @@ impl Agent {
             model: String::new(),
             stop_condition: StopCondition::default(),
             recent_tool_calls: vec![],
-            max_iterations: 200,
+            max_iterations: 0, // 0 = unlimited; use OnStuck or token budget instead
             empty_retries: 0,
             max_empty_retries: 2,
             length_continues: 0,
