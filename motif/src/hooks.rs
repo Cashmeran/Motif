@@ -97,11 +97,6 @@ pub trait AgentHook: Send + Sync {
         should_stop: bool,
     ) -> crate::Result<bool> { Ok(should_stop) }
 
-    // --- Request-level ---
-    /// Called before the provider is invoked. The hook receives the
-    /// assembled messages. Modifications to ctx.messages will be reflected.
-    async fn on_request(&self, _ctx: &mut HookContext) -> crate::Result<()> { Ok(()) }
-
     // --- Error ---
     async fn on_error(&self, _ctx: &mut HookContext, _error: &Error) -> crate::Result<()> {
         Ok(())

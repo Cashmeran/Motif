@@ -275,13 +275,6 @@ impl Agent {
             }
         }
 
-        // Hook: on_request — final gate before provider
-        for hook in &self.hooks {
-            if let Err(e) = hook.on_request(&mut hook_ctx).await {
-                tracing::warn!("Hook.on_request error: {}", e);
-            }
-        }
-
         // Call LLM
         let llm_start = std::time::Instant::now();
         let response = self
