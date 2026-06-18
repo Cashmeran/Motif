@@ -122,19 +122,20 @@ src/
 └── main.rs       CLI
 ```
 
-## 对比
+## 对比（轻量级 Agent 框架）
 
-| | Motif | tiny-loop | nanobot | Aegis |
-|---|-------|-----------|---------|-------|
-| 语言 | Rust | Rust | Python | Rust |
-| 代码量 | ~2,500 行 | ~920 行 | ~15,000 行 | ~165,000 行 |
-| 终止条件 | 5 种可配置 | 1 种硬编码 | 1 种硬编码 | 1 种硬编码 |
-| Hook 系统 | 9 方法 | 无 | 12 方法 | 无 |
-| 工具宏 | `#[tool]` fn+impl | `#[tool]` fn | decorator | 手动 trait |
-| 提示词缓存 | 3 层指纹 | 无 | Jinja2 | 3 层 SHA256 |
-| Provider 重试 | 429/5xx | 无 | 3 种模式 | 有 |
-| Trait 注入 | 全部 6 核心 | 3 个 trait | 插件系统 | 40 参数构造器 |
-| CLI | 内建 | examples/ | gateway | 内建 |
+| | Motif | tiny-loop | nanobot | pi-mono |
+|---|-------|-----------|---------|---------|
+| 语言 | Rust | Rust | Python | TypeScript |
+| 代码量 | ~2,500 行 | ~920 行 | ~15,000 行 | ~120,000 行 |
+| 定位 | 通用核心库 | 通用核心库 | 全栈 agent | 编码 agent |
+| 终止条件 | 5 种可配置 | 1 种 | 1 种 | 1 种 |
+| Hook 系统 | 9 方法 | 无 | 12 方法 | 有 |
+| 工具宏 | `#[tool]` fn+impl | `#[tool]` fn | decorator | 手动注册 |
+| 提示词缓存 | 3 层指纹 | 无 | Jinja2 | 无 |
+| Provider | OpenAI 系列 | OpenAI 系列 | 10+ provider | 10+ provider |
+| Trait 注入 | 全部 6 核心 | 3 个 trait | 插件系统 | DI 容器 |
+| CLI | 内建 | examples/ | gateway | TUI
 
 ## 测试
 
