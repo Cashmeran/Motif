@@ -28,7 +28,7 @@ let agent = Agent::new(provider)   // 必选：LLMProvider
 | `tool_definitions` | `Vec<ToolDefinition>` | `vec![]` | 工具 schema 缓存 |
 | `model` | `String` | `""` | 运行时上下文使用的模型名 |
 | `stop_condition` | `StopCondition` | `OnText` | 控制何时终止循环 |
-| `max_iterations` | `usize` | `100` | 安全防护上限 |
+| `max_iterations` | `usize` | `0`（无限） | 安全防护上限，0 表示不限制。配合 `OnStuck` 检测死循环 |
 | `total_tokens` | `u64` | `0` | 累计 token 消耗 |
 
 ## 核心方法

@@ -78,6 +78,20 @@ let provider = OpenAIProvider::new(
 
 `OpenAIProvider` 自动从 API 响应提取 `usage` 字段，填入 `LLMResponse.usage`。Agent 在 `step()` 中累加到 `total_tokens`。
 
+### Anthropic 格式
+
+```rust
+let provider = OpenAIProvider::new(
+    "https://api.deepseek.com/anthropic", "sk-...", "deepseek-v4-pro",
+).with_anthropic();
+```
+
+支持 DeepSeek Anthropic 端点（`/anthropic/messages`）。消息自动转换：
+- System prompt → 顶层 `system` 字段
+- 工具 schema → `input_schema` 格式
+- 工具结果 → `tool_result` content block
+- Auth → `x-api-key` header
+
 ### 思考模式（DeepSeek）
 
 ```rust
