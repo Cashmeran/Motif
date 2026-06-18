@@ -87,11 +87,25 @@ pub fn make_agent(cfg: &Config) -> motif::Agent {
     if let Some(ref extra) = cfg.extra_body {
         for (k, v) in extra { provider = provider.with_body(k, v.clone()); }
     }
-    Agent::new(provider)
+    let mut agent = Agent::new(provider)
         .history(motif_session::FileHistory::new(None))
         .model(&cfg.model)
         .max_iterations(100)
         .tool(motif_tools::search::register())
         .tool(motif_tools::read::register())
         .tool(motif_tools::write::register())
+        .hook(StreamPrinter);
+    agent
+}
+
+/// Hook that prints streaming content deltas to stdout.
+struct StreamPrinter;
+#[async_trait::async_trait]
+impl motif::AgentHook for StreamPrinter {
+    async fn on_stream_delta(&self, delta: &str) -> motif::Result<()> {
+        use std::io::Write;
+        print!("{}", delta);
+        std::io::stdout().flush().ok();
+        Ok(())
+    }
 }

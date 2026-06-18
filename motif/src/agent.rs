@@ -4,7 +4,7 @@ use crate::prompt::{self, Prompt, PromptBuilder};
 use crate::provider::LLMProvider;
 use crate::tool::{Executor, RegisteredTool, ToolExecutor};
 use crate::types::{
-    FinishReason, LLMResponse, Message, SystemMessage, TimedMessage, ToolDefinition,
+    AssistantMessage, FinishReason, LLMResponse, Message, SystemMessage, TimedMessage, ToolDefinition,
 };
 use std::future::Future;
 use std::sync::Arc;
@@ -482,18 +482,142 @@ impl Agent {
         }
     }
 
-    /// Send a user message and run to completion.
-    /// Runtime context (date/model) is prepended to the message.
+    /// Send a user message and run to completion (non-streaming).
     pub async fn chat(&mut self, content: impl Into<String>) -> crate::Result<String> {
         let content = content.into();
         let ctx = prompt::runtime_context(&self.model);
-        let full = if content.is_empty() {
-            ctx
-        } else {
-            format!("{}\n{}", ctx, content)
-        };
+        let full = if content.is_empty() { ctx } else { format!("{}\n{}", ctx, content) };
         self.history.add(TimedMessage::new(Message::user(full)));
         self.run().await
+    }
+
+    /// Send a user message with streaming output. Each content delta is
+    /// forwarded to `on_stream_delta` hooks. Returns the complete response
+    /// (same as `chat()`).
+    pub async fn chat_stream(&mut self, content: impl Into<String>) -> crate::Result<String> {
+        let content = content.into();
+        let ctx = prompt::runtime_context(&self.model);
+        let full = if content.is_empty() { ctx } else { format!("{}\n{}", ctx, content) };
+        self.history.add(TimedMessage::new(Message::user(full)));
+        self.run_stream().await
+    }
+
+    /// Streaming version of run(). Intercepts each step's LLM call to use
+    /// call_stream() instead, forwarding deltas to hooks.
+    async fn run_stream(&mut self) -> crate::Result<String> {
+        let mut run_ctx = RunContext::new();
+        for hook in &self.hooks {
+            if let Err(e) = hook.before_run(&mut run_ctx).await {
+                tracing::warn!("Hook.before_run error: {}", e);
+            }
+        }
+        let mut iterations = 0;
+        loop {
+            if self.max_iterations > 0 && iterations >= self.max_iterations { break; }
+            iterations += 1;
+
+            // Build prompt + messages (same as step())
+            let extensions: Vec<String> = self.prompt_builders.iter().filter_map(|b| b.build()).collect();
+            let prompt_text = self.prompt.build(&extensions);
+            let system_msg = Message::System(SystemMessage { content: prompt_text });
+            let mut turn_messages = vec![system_msg];
+            for timed in self.history.get_all() { turn_messages.push(timed.message.clone()); }
+
+            self.step_count += 1;
+            let mut hook_ctx = HookContext::new(self.step_count, self.history.get_all().to_vec());
+            for hook in &self.hooks {
+                if let Err(e) = hook.before_llm(&mut hook_ctx).await {
+                    tracing::warn!("Hook.before_llm error: {}", e);
+                }
+            }
+
+            // Use streaming provider call
+            let llm_start = std::time::Instant::now();
+            let stream = self.provider.call_stream(&turn_messages, &self.tool_definitions).await?;
+            let mut full_content = String::new();
+            let mut finish_reason = FinishReason::Stop;
+
+            let mut receiver = stream.receiver;
+            while let Some(event) = receiver.recv().await {
+                match event {
+                    crate::types::StreamEvent::Content(delta) => {
+                        for hook in &self.hooks {
+                            if let Err(e) = hook.on_stream_delta(&delta).await {
+                                tracing::warn!("Hook.on_stream_delta error: {}", e);
+                            }
+                        }
+                        full_content.push_str(&delta);
+                    }
+                    crate::types::StreamEvent::Finish(reason) => {
+                        finish_reason = reason;
+                        break;
+                    }
+                }
+            }
+            let elapsed = llm_start.elapsed();
+            drop(receiver); // stream is consumed
+
+            let response = LLMResponse {
+                message: AssistantMessage { content: full_content, tool_calls: None },
+                finish_reason,
+                usage: None,
+            };
+
+            if let Some(ref usage) = response.usage { self.total_tokens += usage.total_tokens as u64; }
+            self.history.add(TimedMessage {
+                message: Message::Assistant(response.message.clone()),
+                timestamp: std::time::SystemTime::now(), elapsed,
+            });
+            hook_ctx.response = Some(response.clone());
+
+            // Execute tools if any
+            if let Some(ref calls) = response.message.tool_calls {
+                if !calls.is_empty() {
+                    hook_ctx.tool_calls = calls.clone();
+                    for hook in &self.hooks {
+                        if let Err(e) = hook.before_tools(&mut hook_ctx).await { tracing::warn!("Hook.before_tools error: {}", e); }
+                    }
+                    let results = self.executor.execute(calls.clone()).await;
+                    hook_ctx.tool_results = results.clone();
+                    for result in &results {
+                        self.history.add(TimedMessage {
+                            message: Message::Tool(result.tool_message.clone()),
+                            timestamp: result.timestamp, elapsed: result.elapsed,
+                        });
+                    }
+                    for hook in &self.hooks {
+                        if let Err(e) = hook.after_tools(&mut hook_ctx).await { tracing::warn!("Hook.after_tools error: {}", e); }
+                    }
+                }
+            }
+
+            // Recovery
+            if self.try_recover(&response).await { continue; }
+
+            // Stop check with hooks
+            let mut should_stop = self.stop_condition.should_stop(&response, self.history.get_all(), &self.recent_tool_calls);
+            for hook in &self.hooks {
+                match hook.on_stop_check(&mut hook_ctx, should_stop).await {
+                    Ok(false) => should_stop = false,
+                    Err(e) => tracing::warn!("Hook.on_stop_check error: {}", e),
+                    _ => {}
+                }
+            }
+            if should_stop {
+                let finalized = {
+                    let mut c = response.message.content.clone();
+                    for hook in &self.hooks { c = hook.finalize_content(&c); }
+                    c
+                };
+                run_ctx.final_content = Some(finalized.clone());
+                self.exit_cleanup(&mut run_ctx).await;
+                return Ok(finalized);
+            }
+        }
+        let fb = "Max iterations reached".to_string();
+        run_ctx.final_content = Some(fb.clone());
+        self.exit_cleanup(&mut run_ctx).await;
+        Ok(fb)
     }
 
     /// Access the underlying tool definitions (for introspection).

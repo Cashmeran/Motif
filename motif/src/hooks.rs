@@ -84,6 +84,10 @@ pub trait AgentHook: Send + Sync {
         Ok(())
     }
 
+    // --- Stream ---
+    /// Called for each content delta during streaming. Default no-op.
+    async fn on_stream_delta(&self, _delta: &str) -> crate::Result<()> { Ok(()) }
+
     // --- Message-level ---
     /// Called before a message is appended to history. Return `Ok(false)` to discard.
     async fn on_message(&self, _msg: &TimedMessage) -> crate::Result<bool> { Ok(true) }
