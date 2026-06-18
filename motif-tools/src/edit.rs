@@ -64,19 +64,30 @@ fn edit_impl(args: String) -> std::pin::Pin<Box<dyn std::future::Future<Output =
         // No-op
         if old == new { return "old_string and new_string are identical — nothing to do".to_string(); }
 
-        // Replace
+        // Quote normalization: LLM may output straight quotes while file has curly quotes (or vice versa)
+        let old_matched = match normalize_quotes(&old, &content) {
+            Some(actual) => actual,
+            None => {
+                // Concurrent modification detection: content hash changed since last read?
+                // Write the hash to a static tracker on each read, compare here.
+                return format!("old_string not found in {}", file_path);
+            }
+        };
+        let actual_old = if old_matched == old { old.clone() } else { old_matched };
+
+        // Replace using the actual (possibly normalized) old string
         let result = if replace_all {
-            if !content.contains(&old) {
+            if !content.contains(&actual_old) {
                 format!("old_string not found in {}", file_path)
             } else {
-                let replaced = content.replace(&old, &new);
+                let replaced = content.replace(&actual_old, &new);
                 match std::fs::write(&file_path, &replaced) {
-                    Ok(()) => format!("Replaced {} occurrences in {}", content.matches(&old).count(), file_path),
+                    Ok(()) => format!("Replaced {} occurrences in {}", content.matches(&actual_old).count(), file_path),
                     Err(e) => format!("Error writing file: {}", e),
                 }
             }
         } else {
-            let count = content.match_indices(&old).count();
+            let count = content.match_indices(&actual_old).count();
             if count == 0 {
                 format!("old_string not found in {}", file_path)
             } else if count > 1 {
@@ -85,7 +96,7 @@ fn edit_impl(args: String) -> std::pin::Pin<Box<dyn std::future::Future<Output =
                     count, file_path
                 )
             } else {
-                let replaced = content.replacen(&old, &new, 1);
+                let replaced = content.replacen(&actual_old, &new, 1);
                 match std::fs::write(&file_path, &replaced) {
                     Ok(()) => format!("Edited {}", file_path),
                     Err(e) => format!("Error writing file: {}", e),
@@ -94,4 +105,39 @@ fn edit_impl(args: String) -> std::pin::Pin<Box<dyn std::future::Future<Output =
         };
         result
     })
+}
+
+/// Try common quote variants when the exact old_string is not found.
+/// LLMs often output straight quotes (""") while source files may use
+/// curly quotes ("\u{201c}" / "\u{201d}"), and vice versa.
+fn normalize_quotes(needle: &str, haystack: &str) -> Option<String> {
+    if haystack.contains(needle) { return Some(needle.to_string()); }
+
+    // Straight → curly double
+    if needle.contains('"') {
+        let curly = needle.replace('"', "\u{201c}");
+        if haystack.contains(&curly) { return Some(curly); }
+        let curly2 = needle.replace('"', "\u{201d}");
+        if haystack.contains(&curly2) { return Some(curly2); }
+    }
+
+    // Curly double → straight
+    if needle.contains('\u{201c}') || needle.contains('\u{201d}') {
+        let straight = needle.replace('\u{201c}', "\"").replace('\u{201d}', "\"");
+        if haystack.contains(&straight) { return Some(straight); }
+    }
+
+    // Straight → curly single
+    if needle.contains('\'') {
+        let curly = needle.replace('\'', "\u{2018}");
+        if haystack.contains(&curly) { return Some(curly); }
+    }
+
+    // Curly single → straight
+    if needle.contains('\u{2018}') {
+        let straight = needle.replace('\u{2018}', "'");
+        if haystack.contains(&straight) { return Some(straight); }
+    }
+
+    None
 }

@@ -19,6 +19,7 @@ const DESTRUCTIVE_SUBSTRINGS: &[&str] = &[
     "> /dev/sda", "> /dev/hda",
     "shutdown", "reboot", "halt", "poweroff",
     "git push --force", "git push -f",
+    "zmodload", "emulate", "sysopen", "ztcp", "zpty",
 ];
 
 pub fn register() -> RegisteredTool {
