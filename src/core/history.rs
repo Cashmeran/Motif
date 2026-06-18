@@ -101,6 +101,140 @@ impl History for BoundedHistory {
     }
 }
 
+// --- FileHistory ---
+
+use std::fs::{self, File, OpenOptions};
+use std::io::{BufWriter, Write};
+use std::path::PathBuf;
+
+/// Persistent history backed by JSONL files at `~/.motif/sessions/`.
+/// Each `add()` writes a single line to the file and fsyncs.
+/// `clear()` starts a new session file.
+pub struct FileHistory {
+    messages: Vec<TimedMessage>,
+    session_id: String,
+    sessions_dir: PathBuf,
+    file: Option<BufWriter<File>>,
+}
+
+impl FileHistory {
+    /// Start a new session. Creates the sessions directory if needed.
+    /// `session_id: None` generates a random 12-char id.
+    pub fn new(session_id: Option<&str>) -> Self {
+        let dir = dirs_sessions_dir();
+        let _ = fs::create_dir_all(&dir);
+        let id = session_id.map(|s| s.to_string()).unwrap_or_else(nano_id);
+        let path = dir.join(format!("{}.jsonl", id));
+        let file = OpenOptions::new().create(true).append(true).open(&path).ok();
+        let f = file.map(|f| BufWriter::new(f));
+        // Write metadata first line
+        let mut fh = Self { messages: vec![], session_id: id, sessions_dir: dir, file: f };
+        fh.append_raw(&serde_json::json!({"_meta": true, "created": chrono_now()}));
+        fh.save_latest();
+        fh.save_index().ok();
+        fh
+    }
+
+    /// Load an existing session by ID. Reads all JSONL lines into memory.
+    pub fn load(id: &str) -> Option<Self> {
+        let dir = dirs_sessions_dir();
+        let path = dir.join(format!("{}.jsonl", id));
+        let data = fs::read_to_string(&path).ok()?;
+        let messages: Vec<TimedMessage> = data
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+            .filter(|l| !l.contains("\"_meta\""))
+            .filter_map(|l| serde_json::from_str::<TimedMessage>(l).ok())
+            .collect();
+        if messages.is_empty() { return None; }
+        let file = OpenOptions::new().create(true).append(true).open(&path).ok().map(|f| BufWriter::new(f));
+        let fh = Self { messages, session_id: id.to_string(), sessions_dir: dir, file };
+        fh.save_latest();
+        Some(fh)
+    }
+
+    /// List all session IDs from index.json.
+    pub fn list() -> Vec<serde_json::Value> {
+        let idx = dirs_sessions_dir().join("index.json");
+        if let Ok(data) = fs::read_to_string(&idx) {
+            serde_json::from_str(&data).unwrap_or_default()
+        } else { vec![] }
+    }
+
+    /// Current session ID.
+    pub fn session_id(&self) -> &str { &self.session_id }
+
+    fn append_raw(&mut self, v: &serde_json::Value) {
+        if let Some(ref mut f) = self.file {
+            let mut line = serde_json::to_string(v).unwrap_or_default();
+            line.push('\n');
+            let _ = f.write_all(line.as_bytes());
+            let _ = f.flush();
+        }
+    }
+
+    fn save_latest(&self) {
+        let latest = self.sessions_dir.join("latest");
+        let target = format!("{}.jsonl", self.session_id);
+        let _ = fs::remove_file(&latest);
+        #[cfg(unix)] { std::os::unix::fs::symlink(target, latest).ok(); }
+        #[cfg(not(unix))] {
+            // Windows: write a file containing the session ID
+            let _ = fs::write(&latest, &target);
+        }
+    }
+
+    fn save_index(&self) -> std::io::Result<()> {
+        let mut idx: Vec<serde_json::Value> = Self::list();
+        let first_msg = self.messages.first().map(|m| serde_json::to_value(m).unwrap_or_default());
+        // Remove existing entry for this session
+        idx.retain(|e| e.get("id").and_then(|i| i.as_str()) != Some(&self.session_id));
+        idx.push(serde_json::json!({
+            "id": self.session_id,
+            "date": chrono_now(),
+            "count": self.messages.len(),
+            "first": first_msg,
+        }));
+        let data = serde_json::to_string_pretty(&idx)?;
+        fs::write(self.sessions_dir.join("index.json"), &data)
+    }
+}
+
+impl History for FileHistory {
+    fn add(&mut self, message: TimedMessage) {
+        self.append_raw(&serde_json::to_value(&message).unwrap_or_default());
+        self.messages.push(message);
+    }
+
+    fn get_all(&self) -> &[TimedMessage] { &self.messages }
+
+    fn clear(&mut self) {
+        self.messages.clear();
+        // Start a new session
+        self.session_id = nano_id();
+        let path = self.sessions_dir.join(format!("{}.jsonl", self.session_id));
+        let file = OpenOptions::new().create(true).append(true).open(&path).ok();
+        self.file = file.map(|f| BufWriter::new(f));
+        self.append_raw(&serde_json::json!({"_meta": true, "created": chrono_now()}));
+        self.save_latest();
+        self.save_index().ok();
+    }
+}
+
+fn dirs_sessions_dir() -> PathBuf {
+    dirs::home_dir().unwrap_or_default().join(".motif").join("sessions")
+}
+
+fn nano_id() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let t = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos();
+    format!("{:016x}", t).chars().take(12).collect()
+}
+
+fn chrono_now() -> String {
+    chrono::Local::now().format("%Y-%m-%d %H:%M").to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -158,5 +292,34 @@ mod tests {
         } else {
             panic!("expected user message");
         }
+    }
+
+    #[test]
+    fn test_file_history_roundtrip() {
+        let mut h = FileHistory::new(Some("test_session"));
+        h.add(TimedMessage::new(Message::user("hello")));
+        h.add(TimedMessage::new(Message::system("sys")));
+        assert_eq!(h.get_all().len(), 2);
+        assert_eq!(h.session_id(), "test_session");
+
+        // Check file exists
+        let path = dirs::home_dir().unwrap().join(".motif").join("sessions").join("test_session.jsonl");
+        assert!(path.exists());
+        let content = fs::read_to_string(&path).unwrap();
+        assert!(content.contains("hello"));
+        assert!(content.contains("\"_meta\""));
+
+        // Cleanup
+        fs::remove_file(&path).ok();
+    }
+
+    #[test]
+    fn test_file_history_clear() {
+        let mut h = FileHistory::new(Some("test_clear"));
+        h.add(TimedMessage::new(Message::user("a")));
+        h.clear();
+        assert!(h.get_all().is_empty());
+        let path = dirs::home_dir().unwrap().join(".motif").join("sessions").join("test_clear.jsonl");
+        fs::remove_file(&path).ok();
     }
 }

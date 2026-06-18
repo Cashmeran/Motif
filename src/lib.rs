@@ -29,7 +29,7 @@
 //! }
 //! ```
 
-mod core;
+pub mod core;
 
 pub mod tool {
     pub use crate::core::tool::*;

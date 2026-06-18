@@ -81,6 +81,7 @@ pub struct OpenAIProvider {
     extra_body: serde_json::Map<String, serde_json::Value>,
     max_retries: usize,
     retry_delay_ms: u64,
+    thinking_effort: Option<String>,
 }
 
 impl OpenAIProvider {
@@ -100,6 +101,7 @@ impl OpenAIProvider {
             extra_body: Default::default(),
             max_retries: 2,
             retry_delay_ms: 1000,
+            thinking_effort: None,
         }
     }
 
@@ -116,8 +118,11 @@ impl OpenAIProvider {
     }
 
     /// Set max retry attempts for transient errors (default 2).
-    pub fn with_retry(mut self, max: usize) -> Self {
-        self.max_retries = max;
+    pub fn with_retry(mut self, max: usize) -> Self { self.max_retries = max; self }
+
+    /// Enable DeepSeek thinking mode (reasoning_effort: "high" or "max").
+    pub fn with_thinking(mut self, effort: &str) -> Self {
+        self.thinking_effort = Some(effort.to_string());
         self
     }
 
@@ -217,12 +222,12 @@ impl OpenAIProvider {
         if stream {
             body["stream"] = serde_json::Value::Bool(true);
         }
-        if !tools.is_empty() {
-            body["tools"] = serde_json::to_value(tools).unwrap();
+        if !tools.is_empty() { body["tools"] = serde_json::to_value(tools).unwrap(); }
+        if let Some(ref effort) = self.thinking_effort {
+            body["thinking"] = serde_json::json!({"type": "enabled"});
+            body["reasoning_effort"] = serde_json::Value::String(effort.clone());
         }
-        for (k, v) in &self.extra_body {
-            body[k] = v.clone();
-        }
+        for (k, v) in &self.extra_body { body[k] = v.clone(); }
         body
     }
 }
