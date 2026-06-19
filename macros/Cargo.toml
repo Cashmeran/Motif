@@ -6,7 +6,7 @@ description = "Procedural macros for the Motif agent framework"
 license = "MIT"
 repository = "https://github.com/Cashmeran/Motif"
 homepage = "https://github.com/Cashmeran/Motif"
-documentation = "https://docs.rs/motif-macros"
+documentation = "https://docs.rs/macros"
 readme = "../README.md"
 
 [lib]

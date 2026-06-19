@@ -65,13 +65,14 @@ fn search_impl(args: String) -> std::pin::Pin<Box<dyn std::future::Future<Output
             "content" | "count" | "files_with_matches" => {
                 search_content(root, &query, &mode, glob, ignore_case, multiline, head_limit, offset, before, after, line_numbers).await
             }
-            "filename" | _ => {
+            _ => {
                 search_filenames(root, &query, glob, head_limit, offset).await
             }
         }
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn search_content(
     root: &Path,
     pattern: &str,
@@ -160,12 +161,12 @@ async fn search_content(
                                 let mut block = String::new();
                                 let ctx_start = if before > 0 { i.saturating_sub(before) } else { i };
                                 let ctx_end = (i + after + 1).min(lines.len());
-                                for j in ctx_start..ctx_end {
+                                for (j, line) in lines.iter().enumerate().skip(ctx_start).take(ctx_end - ctx_start) {
                                     let marker = if j == i { ">" } else { " " };
                                     if line_numbers {
-                                        let _ = writeln!(block, "{}{:>6} {}", marker, j + 1, lines[j]);
+                                        let _ = writeln!(block, "{}{:>6} {}", marker, j + 1, line);
                                     } else {
-                                        let _ = writeln!(block, "{}{}", marker, lines[j]);
+                                        let _ = writeln!(block, "{}{}", marker, line);
                                     }
                                 }
                                 if ctx_end < lines.len() || ctx_start > 0 {

@@ -13,3 +13,6 @@
 #[path = "modules/provider_retry.rs"] mod pr;
 #[path = "modules/provider_stream.rs"] mod ps;
 #[path = "modules/prompt_concurrent.rs"] mod pc;
+#[path = "modules/core_error.rs"] mod ce;
+#[path = "modules/core_types.rs"] mod ct;
+#[path = "modules/tools_web_fetch.rs"] mod twf;

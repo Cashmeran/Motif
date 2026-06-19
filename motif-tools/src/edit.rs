@@ -135,7 +135,7 @@ fn normalize_quotes(needle: &str, haystack: &str) -> Option<String> {
 
     // Curly double → straight
     if needle.contains('\u{201c}') || needle.contains('\u{201d}') {
-        let straight = needle.replace('\u{201c}', "\"").replace('\u{201d}', "\"");
+        let straight = needle.replace(['\u{201c}', '\u{201d}'], "\"");
         if haystack.contains(&straight) { return Some(straight); }
     }
 

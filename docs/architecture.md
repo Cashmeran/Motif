@@ -28,7 +28,7 @@ Motif/                              # workspace（只有 Cargo.toml）
 │   │   ├── tool.rs                 # Tool trait + Executor + ToolDef + ToolArgs
 │   │   ├── history.rs              # History trait + InfiniteHistory + BoundedHistory
 │   │   ├── prompt.rs               # Prompt (3层缓存) + PromptBuilder trait
-│   │   ├── hooks.rs                # AgentHook trait (9生命周期)
+│   │   ├── hooks.rs                # AgentHook trait (15生命周期)
 │   │   ├── types.rs                # Message / ToolCall / LLMResponse / TokenUsage
 │   │   └── error.rs                # Error + Result
 │   └── tests/
@@ -44,14 +44,17 @@ Motif/                              # workspace（只有 Cargo.toml）
 │       ├── main.rs                 # 主循环 + agent 创建
 │       ├── config.rs               # ~/.motif/config.json 读写
 │       ├── commands.rs             # Command trait + Registry
-│       ├── keybind.rs              # 快捷键骨架
+│       ├── lib.rs                  # 库入口（供测试引用）
 │       └── cmd/                    # 各命令
 │           ├── mod.rs
 │           ├── clear.rs
 │           ├── help.rs
 │           ├── status.rs
 │           ├── list.rs
-│           └── load.rs
+│           ├── load.rs
+│           ├── config_cmd.rs
+│           ├── delete.rs
+│           └── export.rs
 │
 ├── motif-tools/                    # 通用工具包（独立 crate）
 │   ├── Cargo.toml                  # 依赖 motif + regex + reqwest

@@ -7,7 +7,8 @@ use std::collections::HashMap;
 
 pub enum Outcome {
     Continue,
-    #[allow(dead_code)] Exit,
+    #[allow(dead_code)] // used in bin target (main.rs), not visible to lib clippy
+    Exit,
     PassToAgent(String),
 }
 
@@ -20,6 +21,12 @@ pub trait Command: Send + Sync {
 
 pub struct Registry {
     cmds: HashMap<String, Box<dyn Command>>,
+}
+
+impl Default for Registry {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Registry {

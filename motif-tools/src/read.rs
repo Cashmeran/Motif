@@ -80,7 +80,7 @@ fn read_impl(args: String) -> std::pin::Pin<Box<dyn std::future::Future<Output =
         let end = (start + effective_limit).min(total);
 
         let mut out = String::new();
-        for (_i, line) in lines[start..end].iter().enumerate() {
+        for line in lines[start..end].iter() {
             let _ = writeln!(out, "{}", line);
         }
 

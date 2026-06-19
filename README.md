@@ -158,11 +158,10 @@ Motif/                              ← workspace
 
 ## 测试
 
-79 mock + 13 live（真实 DeepSeek API 调用）。零 unsafe。
+103 mock + 0 live。零 unsafe。所有测试集中在独立 `motif-tests` crate。
 
 ```bash
-cargo test                                    # 79 mock
-MOTIF_API_KEY=sk-... cargo test -- --ignored  # +13 live
+cargo test                                    # 103 mock
 ```
 
 ## License

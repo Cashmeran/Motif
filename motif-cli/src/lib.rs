@@ -2,4 +2,3 @@
 pub mod cmd;
 pub mod commands;
 pub mod config;
-pub mod keybind;

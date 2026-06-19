@@ -90,15 +90,15 @@ pub fn make_agent(cfg: &Config) -> motif::Agent {
     if let Some(ref extra) = cfg.extra_body {
         for (k, v) in extra { provider = provider.with_body(k, v.clone()); }
     }
-    let mut agent = Agent::new(provider)
+    
+    Agent::new(provider)
         .history(motif_session::FileHistory::new(None))
         .model(&cfg.model)
         // max_iterations uses core default (0 = unlimited)
         .tool(motif_tools::search::register())
         .tool(motif_tools::read::register())
         .tool(motif_tools::write::register())
-        .hook(StreamPrinter);
-    agent
+        .hook(StreamPrinter)
 }
 
 /// Hook that prints streaming content deltas to stdout.

@@ -39,13 +39,16 @@ motif-cli/src/
 ├── main.rs        ← 主循环（35 行）
 ├── config.rs      ← 配置加载 + agent 创建
 ├── commands.rs    ← Command trait + Registry
-├── keybind.rs     ← 快捷键骨架
+├── lib.rs         ← 库入口（供测试引用）
 └── cmd/           ← 命令实现
     ├── help.rs
     ├── clear.rs
     ├── status.rs
     ├── list.rs
-    └── load.rs
+    ├── load.rs
+    ├── config_cmd.rs
+    ├── delete.rs
+    └── export.rs
 ```
 
 ## 命令
