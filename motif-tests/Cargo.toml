@@ -1,0 +1,21 @@
+[package]
+name = "motif-tests"
+version = "0.1.0"
+edition = "2021"
+description = "Comprehensive test suite for Motif — zero test code in core crates"
+license = "MIT"
+repository = "https://github.com/Cashmeran/Motif"
+publish = false
+
+[dev-dependencies]
+motif = { path = "../motif" }
+motif-tools = { path = "../motif-tools" }
+motif-cli = { path = "../motif-cli" }
+motif-session = { path = "../motif-session" }
+macros = { path = "../macros" }
+tokio = { version = "1", features = ["full"] }
+serde_json = "1"
+serde = { version = "1", features = ["derive"] }
+async-trait = "0.1"
+schemars = "1"
+futures = "0.3"
