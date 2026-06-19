@@ -57,6 +57,7 @@ type ToolFn = Arc<dyn Fn(String) -> Pin<Box<dyn Future<Output = String> + Send>>
 pub struct FunctionTool {
     func: ToolFn,
     concurrency: ConcurrencySafety,
+    meta: ToolMetadata,
 }
 
 impl FunctionTool {
@@ -68,11 +69,17 @@ impl FunctionTool {
         Self {
             func: Arc::new(move |args: String| Box::pin(f(args))),
             concurrency: ConcurrencySafety::ConcurrentSafe,
+            meta: ToolMetadata::default(),
         }
     }
 
     pub fn with_concurrency(mut self, c: ConcurrencySafety) -> Self {
         self.concurrency = c;
+        self
+    }
+
+    pub fn with_metadata(mut self, m: ToolMetadata) -> Self {
+        self.meta = m;
         self
     }
 }
@@ -85,6 +92,10 @@ impl Tool for FunctionTool {
 
     fn concurrency_safety(&self) -> ConcurrencySafety {
         self.concurrency
+    }
+
+    fn metadata(&self) -> ToolMetadata {
+        self.meta.clone()
     }
 }
 
