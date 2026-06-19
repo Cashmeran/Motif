@@ -98,6 +98,7 @@ pub fn load_or_create() -> Config {
 }
 
 pub fn make_agent(cfg: &Config) -> motif::Agent {
+    use crate::hooks;
     use motif::Agent;
     use motif::OpenAIProvider;
     use motif_tools;
@@ -113,21 +114,12 @@ pub fn make_agent(cfg: &Config) -> motif::Agent {
     Agent::new(provider)
         .history(motif_session::FileHistory::new(None))
         .model(&cfg.model)
-        // max_iterations uses core default (0 = unlimited)
         .tool(motif_tools::search::register())
         .tool(motif_tools::read::register())
         .tool(motif_tools::write::register())
-        .hook(StreamPrinter)
-}
-
-/// Hook that prints streaming content deltas to stdout.
-struct StreamPrinter;
-#[async_trait::async_trait]
-impl motif::AgentHook for StreamPrinter {
-    async fn on_stream_delta(&self, delta: &str) -> motif::Result<()> {
-        use std::io::Write;
-        print!("{}", delta);
-        std::io::stdout().flush().ok();
-        Ok(())
-    }
+        .tool(motif_tools::edit::register())
+        .tool(motif_tools::web_fetch::register())
+        .tool(motif_tools::bash::register())
+        .hook(hooks::StreamPrinter)
+        .hook(hooks::ContextInjection)
 }
