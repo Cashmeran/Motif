@@ -1,6 +1,7 @@
 //! AgentHook implementations — decoupled from config and CLI logic.
 
 use motif::AgentHook;
+use motif::HookContext;
 use std::io::Write;
 
 // ── StreamPrinter ──

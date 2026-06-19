@@ -121,6 +121,11 @@ impl Agent {
         self
     }
 
+    /// Return the model name currently set on this agent.
+    pub fn get_model(&self) -> &str {
+        &self.model
+    }
+
     pub fn max_iterations(mut self, n: usize) -> Self {
         self.max_iterations = n;
         self

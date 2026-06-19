@@ -12,10 +12,10 @@ impl Command for Status {
     fn desc(&self) -> &'static str {
         "Token/model info"
     }
-    async fn run(&self, agent: &mut Agent, _: &str, cfg: &Config, _: &Registry) -> Outcome {
+    async fn run(&self, agent: &mut Agent, _: &str, _: &Config, _: &Registry) -> Outcome {
         println!(
             "Model: {} | Tokens: {} | Messages: {}",
-            cfg.model,
+            agent.get_model(),
             agent.total_tokens_used(),
             agent.history_ref().get_all().len(),
         );
