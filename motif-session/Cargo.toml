@@ -3,6 +3,11 @@ name = "motif-session"
 version = "0.1.0"
 edition = "2021"
 description = "File-based session persistence for Motif"
+license = "MIT"
+repository = "https://github.com/Cashmeran/Motif"
+homepage = "https://github.com/Cashmeran/Motif"
+documentation = "https://docs.rs/motif-session"
+readme = "../README.md"
 
 [dependencies]
 motif = { path = "../motif" }

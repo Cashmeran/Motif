@@ -4,6 +4,10 @@ version = "0.2.0"
 edition = "2021"
 description = "Minimal, extensible Rust agent core — traits only, zero I/O"
 license = "MIT"
+repository = "https://github.com/Cashmeran/Motif"
+homepage = "https://github.com/Cashmeran/Motif"
+documentation = "https://docs.rs/motif"
+readme = "../README.md"
 keywords = ["agent", "llm", "ai", "tool-use"]
 
 [dependencies]

@@ -3,6 +3,11 @@ name = "macros"
 version = "0.2.0"
 edition = "2021"
 description = "Procedural macros for the Motif agent framework"
+license = "MIT"
+repository = "https://github.com/Cashmeran/Motif"
+homepage = "https://github.com/Cashmeran/Motif"
+documentation = "https://docs.rs/motif-macros"
+readme = "../README.md"
 
 [lib]
 proc-macro = true

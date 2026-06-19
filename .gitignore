@@ -1,3 +1,20 @@
 /target
 /Cargo.lock
 /node_modules
+
+# Secrets
+.env
+.env.local
+.motif/
+
+# Editor
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+.DS_Store
+
+# Python
+__pycache__/
+*.pyc
