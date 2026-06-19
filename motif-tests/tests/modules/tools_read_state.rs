@@ -17,3 +17,18 @@ use std::fs;
     assert!(res.contains("Wrote") || res.contains("bytes"), "{}", res);
     fs::remove_file("_trs_new.txt").ok();
 }
+#[test] fn test_mtime_change_after_read_blocked() {
+    fs::write("_trs_mt.txt", "original").unwrap();
+    let (_, r) = motif_tools::read::register().into_parts();
+    let (_, e) = motif_tools::edit::register().into_parts();
+    // Read to allow editing
+    common::call_tool(&r, r#"{"file_path":"_trs_mt.txt"}"#);
+    // Modify file externally (simulating mtime change)
+    std::thread::sleep(std::time::Duration::from_millis(10));
+    fs::write("_trs_mt.txt", "modified externally").unwrap();
+    // Edit should be rejected because mtime changed since read
+    let res = common::call_tool(&e, r#"{"file_path":"_trs_mt.txt","old_string":"modified externally","new_string":"x"}"#);
+    assert!(res.contains("modified since") || res.contains("has not been read"),
+        "Should reject edit after external modification: {}", res);
+    fs::remove_file("_trs_mt.txt").ok();
+}

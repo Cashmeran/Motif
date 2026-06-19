@@ -11,3 +11,5 @@
 #[path = "modules/core_hooks.rs"] mod ch;
 #[path = "modules/core_prompt.rs"] mod cp;
 #[path = "modules/provider_retry.rs"] mod pr;
+#[path = "modules/provider_stream.rs"] mod ps;
+#[path = "modules/prompt_concurrent.rs"] mod pc;
