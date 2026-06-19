@@ -57,6 +57,9 @@ motif-cli/src/
 | `/status` | 显示模型名、Token 数、消息数 |
 | `/list` | 列出历史会话 |
 | `/load <id>` | 恢复指定会话 |
+| `/config` | 显示当前配置（API key 部分遮蔽） |
+| `/delete <id>` | 删除指定会话 |
+| `/export <id>` | 导出会话为 JSON |
 
 ## 命令系统
 
@@ -71,6 +74,14 @@ pub enum Outcome { Continue, Exit, PassToAgent(String) }
 ```
 
 添加命令：在 `cmd/` 下创建文件，在 `commands.rs` 中注册一行。
+
+## CLI 参数
+
+```bash
+motif                 # 启动交互式 REPL
+motif -h, --help      # 显示帮助
+motif -V, --version   # 显示版本
+```
 
 ## 快捷键
 

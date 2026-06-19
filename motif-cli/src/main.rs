@@ -9,6 +9,30 @@ use rustyline::{error::ReadlineError, DefaultEditor};
 
 #[tokio::main]
 async fn main() {
+    // Parse CLI arguments
+    let args: Vec<String> = std::env::args().collect();
+    if args.len() > 1 {
+        match args[1].as_str() {
+            "-h" | "--help" => {
+                println!("Motif CLI — Minimal Rust agent REPL");
+                println!();
+                println!("USAGE:");
+                println!("  motif              Start interactive REPL");
+                println!("  motif -h, --help   Show this help");
+                println!("  motif -V, --version  Show version");
+                println!();
+                println!("CONFIG:  ~/.motif/config.json");
+                println!("SESSION: ~/.motif/sessions/");
+                return;
+            }
+            "-V" | "--version" => {
+                println!("motif {}", env!("CARGO_PKG_VERSION"));
+                return;
+            }
+            _ => {}
+        }
+    }
+
     let cfg = config::load_or_create();
     let mut agent = config::make_agent(&cfg);
     let reg = Registry::new();

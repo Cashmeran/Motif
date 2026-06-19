@@ -127,7 +127,7 @@ Motif/                              ← workspace
 │       ├── main.rs        主循环（35 行）
 │       ├── config.rs      配置加载 + agent 创建
 │       ├── commands.rs    Command trait + Registry
-│       └── cmd/           5 个命令（help/clear/status/list/load）
+│       └── cmd/           8 个命令（help/clear/status/list/load/config/delete/export）
 ├── motif-tools/                   ← 6 个通用工具
 │   └── src/
 │       ├── search.rs      grep + glob 合一（** 跨目录匹配）

@@ -30,6 +30,9 @@ impl Registry {
         r.add(cmd::status::Status);
         r.add(cmd::list::List);
         r.add(cmd::load::Load);
+        r.add(cmd::config_cmd::ConfigCmd);
+        r.add(cmd::delete::Delete);
+        r.add(cmd::export::Export);
         r
     }
 

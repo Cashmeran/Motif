@@ -52,6 +52,38 @@ impl FileHistory {
 
     pub fn session_id(&self) -> &str { &self.session_id }
 
+    /// Delete a session by ID. Returns true if deleted, false if not found.
+    pub fn delete(id: &str) -> bool {
+        let dir = sessions_dir();
+        let path = dir.join(format!("{}.jsonl", id));
+        let deleted = fs::remove_file(&path).is_ok();
+        if deleted {
+            // Remove from index
+            let mut idx: Vec<serde_json::Value> = Self::list();
+            idx.retain(|e| e.get("id").and_then(|i| i.as_str()) != Some(id));
+            let _ = fs::write(dir.join("index.json"), serde_json::to_string_pretty(&idx).unwrap_or_default());
+            // Clear latest if it pointed to this session
+            let latest = dir.join("latest");
+            if fs::read_to_string(&latest).ok().as_deref() == Some(&format!("{}.jsonl", id)) {
+                let _ = fs::remove_file(&latest);
+            }
+        }
+        deleted
+    }
+
+    /// Export session contents as a formatted string.
+    pub fn export(id: &str) -> Option<String> {
+        let dir = sessions_dir();
+        let path = dir.join(format!("{}.jsonl", id));
+        let data = fs::read_to_string(&path).ok()?;
+        let messages: Vec<serde_json::Value> = data.lines()
+            .filter(|l| !l.trim().is_empty() && !l.contains("\"_meta\""))
+            .filter_map(|l| serde_json::from_str(l).ok())
+            .collect();
+        if messages.is_empty() { return None; }
+        serde_json::to_string_pretty(&messages).ok()
+    }
+
     fn append_raw(&mut self, v: &serde_json::Value) {
         if let Some(ref mut f) = self.file {
             let mut line = serde_json::to_string(v).unwrap_or_default();
