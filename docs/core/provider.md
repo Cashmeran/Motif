@@ -43,7 +43,8 @@ pub struct LLMStream {
 }
 
 pub enum StreamEvent {
-    Content(String),   // 文本增量
+    Content(String),    // 文本增量
+    Thinking(String),   // 推理/思考增量（DeepSeek 等推理模型）
     Finish(FinishReason), // 流结束
 }
 ```

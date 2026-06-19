@@ -1,3 +1,4 @@
+use crate::error::Error;
 use crate::types::{Parameters, ToolCall, ToolDefinition, ToolMessage, ToolResult};
 use async_trait::async_trait;
 use std::collections::HashMap;
@@ -55,6 +56,8 @@ type ToolFn = Arc<dyn Fn(String) -> Pin<Box<dyn Future<Output = String> + Send>>
 
 pub struct FunctionTool {
     func: ToolFn,
+    concurrency: ConcurrencySafety,
+    meta: ToolMetadata,
 }
 
 impl FunctionTool {
@@ -65,7 +68,19 @@ impl FunctionTool {
     {
         Self {
             func: Arc::new(move |args: String| Box::pin(f(args))),
+            concurrency: ConcurrencySafety::ConcurrentSafe,
+            meta: ToolMetadata::default(),
         }
+    }
+
+    pub fn with_concurrency(mut self, c: ConcurrencySafety) -> Self {
+        self.concurrency = c;
+        self
+    }
+
+    pub fn with_metadata(mut self, m: ToolMetadata) -> Self {
+        self.meta = m;
+        self
     }
 }
 
@@ -73,6 +88,14 @@ impl FunctionTool {
 impl Tool for FunctionTool {
     async fn call(&self, args: String) -> String {
         (self.func)(args).await
+    }
+
+    fn concurrency_safety(&self) -> ConcurrencySafety {
+        self.concurrency
+    }
+
+    fn metadata(&self) -> ToolMetadata {
+        self.meta.clone()
     }
 }
 
@@ -133,11 +156,11 @@ impl ToolExecutor for Executor {
                 let start = std::time::SystemTime::now();
                 let content = match self.tools.get(&call.function.name) {
                     Some(t) => t.call(call.function.arguments).await,
-                    None => format!(
-                        "Tool '{}' not found. Available: {:?}",
-                        call.function.name,
-                        self.tools.keys().collect::<Vec<_>>()
-                    ),
+                    None => Error::ToolNotFound {
+                        name: call.function.name.clone(),
+                        available: self.tools.keys().cloned().collect(),
+                    }
+                    .to_string(),
                 };
                 let elapsed = start.elapsed().unwrap_or_default();
                 results.push(ToolResult {
@@ -246,6 +269,7 @@ pub struct ToolDef {
     description: String,
     properties: serde_json::Map<String, serde_json::Value>,
     required: Vec<String>,
+    concurrency: ConcurrencySafety,
 }
 
 impl ToolDef {
@@ -255,7 +279,13 @@ impl ToolDef {
             description: description.into(),
             properties: serde_json::Map::new(),
             required: vec![],
+            concurrency: ConcurrencySafety::ConcurrentSafe,
         }
+    }
+
+    pub fn concurrency(mut self, c: ConcurrencySafety) -> Self {
+        self.concurrency = c;
+        self
     }
 
     pub fn param<T: schemars::JsonSchema>(
@@ -314,9 +344,10 @@ impl ToolDef {
         F: Fn(String) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = String> + Send + 'static,
     {
+        let ft = FunctionTool::new(handler).with_concurrency(self.concurrency);
         RegisteredTool {
             definition: self.build_definition(),
-            tool: Arc::new(FunctionTool::new(handler)),
+            tool: Arc::new(ft),
         }
     }
 }

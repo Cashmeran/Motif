@@ -12,6 +12,7 @@ pub fn register() -> RegisteredTool {
     ToolDef::new("write", "Write content to a file. Creates parent directories as needed.")
         .param::<String>("file_path", "Path to write to")
         .param::<String>("content", "Content to write")
+        .concurrency(motif::tool::ConcurrencySafety::ConcurrentUnsafe)
         .build(write_impl)
 }
 

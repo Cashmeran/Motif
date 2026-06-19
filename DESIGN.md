@@ -1,9 +1,15 @@
 # Motif — 设计计划书
 
+> **⚠️ 历史档案** —— 本文档记录 v0.1 的初始设计，仅保留作参考。  
+> v0.1 范围中标注"排除"的特性（`#[tool]` proc-macro、流式 streaming、方法级 bind、  
+> Anthropic 格式、FileHistory、CLI、motif-tools 等）已全部在 v0.2 中实现。  
+> 当前代码结构已从单 crate 演化为 workspace（motif + macros + motif-cli + motif-tools + motif-session）。  
+> 最新状态以源码和 `docs/` 下的文档为准。
+>
 > 版本: v0.1  
 > 日期: 2026-06-17  
 > 定位: 极简、可扩展的 Rust Agent 核心库  
-> 状态: 已确认，待实现
+> 状态: 已实现（代码已远超此文档范围）
 
 ---
 

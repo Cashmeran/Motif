@@ -17,6 +17,7 @@ pub fn register() -> RegisteredTool {
     .param::<String>("old_string", "Exact string to replace. Must be unique in the file")
     .param::<String>("new_string", "Replacement string")
     .param::<bool>("replace_all", "Replace all occurrences (default: false — requires unique match)")
+    .concurrency(motif::tool::ConcurrencySafety::ConcurrentUnsafe)
     .build(edit_impl)
 }
 

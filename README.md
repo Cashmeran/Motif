@@ -109,30 +109,36 @@ agent.bind(db, Database::query);
 ## 架构
 
 ```
-src/
-├── core/           ← 9 文件（不动）
-│   ├── agent.rs      Agent + step/run/chat + 5 种 StopCondition
-│   ├── provider.rs   LLMProvider trait + OpenAIProvider + retry + streaming
-│   ├── tool.rs       Tool trait + Executor + ConcurrencySafety + ToolDef
-│   ├── history.rs    History trait + InfiniteHistory + FileHistory + Bounded
-│   ├── prompt.rs     3 层缓存 Prompt + PromptBuilder trait
-│   ├── hooks.rs      AgentHook (9 方法)
-│   ├── types.rs      Message, ToolCall, LLMResponse, TokenUsage
-│   └── error.rs      Error 枚举
-├── cli/            ← CLI（随便改）
-│   ├── cmd/          5 个命令 (/clear, /help, /list, /load, /status)
-│   ├── commands.rs   命令注册表
-│   ├── config.rs     配置加载 + agent 创建
-│   └── keybind.rs    快捷键骨架
-├── tools/          ← 内建工具（可选）
-│   ├── search.rs     grep + glob 合一（** 支持）
-│   ├── read.rs       文件读取（读后编辑强制）
-│   ├── write.rs      文件写入（读后编辑强制）
-│   ├── edit.rs       精确字符串替换（引号规范化）
-│   ├── web_fetch.rs  HTTP 获取（SSRF 防护）
-│   ├── bash.rs       命令执行（元字符检测）
-│   └── read_state.rs 读后编辑共享状态
-└── lib.rs
+Motif/                              ← workspace
+├── motif/                          ← 纯核心（零 I/O，8 个依赖）
+│   └── src/
+│       ├── agent.rs      Agent + step/run/chat + 5 种 StopCondition
+│       ├── provider.rs   LLMProvider trait + OpenAIProvider + retry + streaming
+│       ├── tool.rs       Tool trait + Executor + ConcurrencySafety + ToolDef
+│       ├── history.rs    History trait + InfiniteHistory + BoundedHistory
+│       ├── prompt.rs     3 层缓存 Prompt + PromptBuilder trait
+│       ├── hooks.rs      AgentHook（15 方法，全生命周期）
+│       ├── types.rs      Message, ToolCall, LLMResponse, StreamEvent, TokenUsage
+│       └── error.rs      Error 枚举
+├── macros/                        ← proc-macro crate
+│   └── src/lib.rs        #[tool] 过程宏（fn + impl + name attr）
+├── motif-cli/                     ← CLI 产品
+│   └── src/
+│       ├── main.rs        主循环（35 行）
+│       ├── config.rs      配置加载 + agent 创建
+│       ├── commands.rs    Command trait + Registry
+│       └── cmd/           5 个命令（help/clear/status/list/load）
+├── motif-tools/                   ← 6 个通用工具
+│   └── src/
+│       ├── search.rs      grep + glob 合一（** 跨目录匹配）
+│       ├── read.rs        文件读取（读后编辑记录）
+│       ├── write.rs       文件写入（读后编辑强制）
+│       ├── edit.rs        精确替换（唯一性 + 引号规范化）
+│       ├── web_fetch.rs   HTTP 获取（HTML→text + SSRF 防护）
+│       ├── bash.rs        命令执行（超时 + 元字符检测）
+│       └── read_state.rs  读后编辑共享状态
+└── motif-session/                 ← 会话持久化
+    └── src/lib.rs         FileHistory（JSONL 增量写 + fsync）
 ```
 
 ## 对比（轻量级 Agent 框架）

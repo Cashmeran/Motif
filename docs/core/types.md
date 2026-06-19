@@ -148,6 +148,7 @@ pub struct TokenUsage {
 ```rust
 pub enum StreamEvent {
     Content(String),       // 流式文本增量
+    Thinking(String),      // 推理/思考增量（DeepSeek 等推理模型）
     Finish(FinishReason),  // 流结束
 }
 ```
@@ -160,6 +161,6 @@ pub struct Parameters(Value);
 
 impl Parameters {
     pub fn new(schema: Value) -> Self;
-    pub fn from_type<T: JsonSchema>() -> Self; // 从 #[tool] 宏生成的类型中自动生成模式
+    pub fn from_type<T: JsonSchema>() -> Self; // 定义于 tool.rs，由 #[tool] 宏使用
 }
 ```

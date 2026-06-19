@@ -33,6 +33,7 @@ pub fn register() -> RegisteredTool {
             "Timeout in milliseconds (default 120000, max 300000)",
         )
         .param::<String>("work_dir", "Working directory for the command")
+        .concurrency(motif::tool::ConcurrencySafety::ConcurrentUnsafe)
         .build(bash_impl)
 }
 
