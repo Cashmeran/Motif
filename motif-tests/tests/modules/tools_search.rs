@@ -1,10 +1,8 @@
 //! Search tool tests: 4 modes, pagination, edge cases.
 
 use crate::common;
-use motif::*;
 use motif_tools;
 use std::fs;
-use std::sync::Arc;
 
 #[test]
 fn test_search_filename_mode() {

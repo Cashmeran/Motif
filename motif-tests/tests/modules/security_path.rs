@@ -1,7 +1,5 @@
 use crate::common;
-use motif::*;
 use motif_tools;
-use std::sync::Arc;
 
 #[test]
 fn test_read_path_traversal() {

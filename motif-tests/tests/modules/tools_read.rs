@@ -1,10 +1,8 @@
 //! Read tool tests.
 
 use crate::common;
-use motif::*;
 use motif_tools;
 use std::fs;
-use std::sync::Arc;
 
 #[test]
 fn test_read_basic() {

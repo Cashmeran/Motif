@@ -1,7 +1,6 @@
 //! Provider streaming and Anthropic format tests using mock HTTP.
 
 use motif::*;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;

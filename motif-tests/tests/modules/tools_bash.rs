@@ -1,9 +1,7 @@
 //! Bash tool tests: echo, timeout, destructive, metachar detection.
 
 use crate::common;
-use motif::*;
 use motif_tools;
-use std::sync::Arc;
 
 #[test]
 fn test_bash_echo() {

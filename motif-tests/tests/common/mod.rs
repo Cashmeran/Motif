@@ -1,3 +1,5 @@
+// Shared by multiple test binaries — some items used only by subsets
+#![allow(dead_code)]
 use motif::*;
 use std::sync::Mutex;
 
