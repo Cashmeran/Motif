@@ -6,8 +6,8 @@ mod common;
 
 use motif::*;
 
-use std::sync::Arc;
 use async_trait::async_trait;
+use std::sync::Arc;
 
 // ── Shared tool functions for #[tool] proc-macro tests ──
 
@@ -267,9 +267,9 @@ async fn test_tool_macro_registration() {
     assert_eq!(result, "Sum computed!");
 
     let history = agent.history_ref().get_all();
-    assert!(history.iter().any(|m| {
-        matches!(&m.message, Message::Tool(tm) if tm.content.contains("3"))
-    }));
+    assert!(history
+        .iter()
+        .any(|m| { matches!(&m.message, Message::Tool(tm) if tm.content.contains("3")) }));
 }
 
 #[tokio::test]
@@ -409,7 +409,9 @@ async fn test_multi_round_conversation() {
 
 #[tokio::test]
 async fn test_stop_condition_never_requires_external_control() {
-    let responses: Vec<_> = (0..10).map(|i| common::text(&format!("msg{}", i))).collect();
+    let responses: Vec<_> = (0..10)
+        .map(|i| common::text(&format!("msg{}", i)))
+        .collect();
     let provider = common::MockProvider::new(responses);
     let mut agent = Agent::new(provider)
         .stop_when(StopCondition::Never)
@@ -430,7 +432,9 @@ async fn test_stop_condition_never_requires_external_control() {
 #[tokio::test]
 async fn test_on_stuck_exact_boundary() {
     // 3 identical calls -> OnStuck { max_repeats: 3 } should fire on the 3rd
-    let responses: Vec<_> = (0..5).map(|_| common::tool_call("ping", r#"{"n":1}"#)).collect();
+    let responses: Vec<_> = (0..5)
+        .map(|_| common::tool_call("ping", r#"{"n":1}"#))
+        .collect();
     let provider = common::MockProvider::new(responses);
     let ping = ToolDef::new("ping", "Ping").build(|_args: String| async { "pong".to_string() });
     let mut agent = Agent::new(provider)
@@ -477,10 +481,8 @@ async fn test_empty_response_retry_limit() {
 
 #[tokio::test]
 async fn test_length_continuation() {
-    let provider = common::MockProvider::new(vec![
-        common::length_response(),
-        common::text("part2"),
-    ]);
+    let provider =
+        common::MockProvider::new(vec![common::length_response(), common::text("part2")]);
     let mut agent = Agent::new(provider);
     let result = agent.chat("continue").await.unwrap();
     assert_eq!(result, "part2");
@@ -660,7 +662,8 @@ async fn test_mixed_concurrency_safety() {
 
 #[tokio::test]
 async fn test_agent_reuse_same_history() {
-    let provider = common::MockProvider::new(vec![common::text("Hello!"), common::text("How are you?")]);
+    let provider =
+        common::MockProvider::new(vec![common::text("Hello!"), common::text("How are you?")]);
     let mut agent = Agent::new(provider);
     let r1 = agent.chat("Hi").await.unwrap();
     assert_eq!(r1, "Hello!");
@@ -729,7 +732,9 @@ async fn test_hook_called_during_run() {
     }
 
     let count = Arc::new(AtomicUsize::new(0));
-    let hook = BeforeRunHook { count: count.clone() };
+    let hook = BeforeRunHook {
+        count: count.clone(),
+    };
 
     let provider = common::MockProvider::new(vec![common::text("Hi")]);
     let mut agent = Agent::new(provider).hook(hook);
@@ -741,10 +746,7 @@ async fn test_hook_called_during_run() {
 
 #[tokio::test]
 async fn test_stop_condition_never_continues() {
-    let provider = common::MockProvider::new(vec![
-        common::text("First"),
-        common::text("Second"),
-    ]);
+    let provider = common::MockProvider::new(vec![common::text("First"), common::text("Second")]);
 
     let mut agent = Agent::new(provider).stop_when(StopCondition::Never);
 
@@ -763,8 +765,8 @@ async fn test_agent_tool_then_text() {
         common::text("Tool done!"),
     ]);
 
-    let echo_tool = ToolDef::new("echo", "Echo back")
-        .build(|_args: String| async { "echo: hi".to_string() });
+    let echo_tool =
+        ToolDef::new("echo", "Echo back").build(|_args: String| async { "echo: hi".to_string() });
 
     let mut agent = Agent::new(provider).tool(echo_tool);
 
@@ -1012,7 +1014,10 @@ async fn test_provider_returns_error() {
 
     let mut agent = Agent::new(ErrorProvider);
     let result = agent.chat("test").await;
-    assert!(result.is_err(), "Provider error should propagate to the caller");
+    assert!(
+        result.is_err(),
+        "Provider error should propagate to the caller"
+    );
 }
 
 #[tokio::test]

@@ -1,23 +1,30 @@
 //! File reading with offset/limit pagination and safety checks.
 
-use motif::RegisteredTool;
-use motif::ToolDef;
 use crate::read_state;
 use crate::PROTECTED_FILES;
+use motif::RegisteredTool;
+use motif::ToolDef;
 use std::fmt::Write as _;
 use std::path::Path;
 
 const MAX_FILE_SIZE: u64 = 256 * 1024; // 256KB
 const MAX_LINES: usize = 2000;
 const BLOCKED_DEVICE_PATHS: &[&str] = &[
-    "/dev/zero", "/dev/random", "/dev/urandom", "/dev/full",
-    "/dev/tty", "/dev/console",
+    "/dev/zero",
+    "/dev/random",
+    "/dev/urandom",
+    "/dev/full",
+    "/dev/tty",
+    "/dev/console",
 ];
 
 pub fn register() -> RegisteredTool {
     ToolDef::new("read", "Read a file with optional line-based pagination")
         .param::<String>("file_path", "Path to the file to read")
-        .param::<u64>("offset", "Start reading from this line (0-indexed, default 0)")
+        .param::<u64>(
+            "offset",
+            "Start reading from this line (0-indexed, default 0)",
+        )
         .param::<u64>("limit", "Max lines to read (default 2000, 0 = unlimited)")
         .build(read_impl)
 }
@@ -26,7 +33,9 @@ fn read_impl(args: String) -> std::pin::Pin<Box<dyn std::future::Future<Output =
     Box::pin(async move {
         let v: serde_json::Value = serde_json::from_str(&args).unwrap_or_default();
         let file_path = v["file_path"].as_str().unwrap_or("").to_string();
-        if file_path.is_empty() { return "Error: 'file_path' is required".to_string(); }
+        if file_path.is_empty() {
+            return "Error: 'file_path' is required".to_string();
+        }
 
         let path = Path::new(&file_path);
 
@@ -56,7 +65,11 @@ fn read_impl(args: String) -> std::pin::Pin<Box<dyn std::future::Future<Output =
             Err(e) => return format!("Cannot access file: {}", e),
         };
         if meta.len() > MAX_FILE_SIZE {
-            return format!("File too large ({} bytes, limit is {})", meta.len(), MAX_FILE_SIZE);
+            return format!(
+                "File too large ({} bytes, limit is {})",
+                meta.len(),
+                MAX_FILE_SIZE
+            );
         }
 
         // Read
@@ -72,7 +85,11 @@ fn read_impl(args: String) -> std::pin::Pin<Box<dyn std::future::Future<Output =
 
         let offset = v["offset"].as_u64().unwrap_or(0) as usize;
         let limit = v["limit"].as_u64().unwrap_or(MAX_LINES as u64) as usize;
-        let effective_limit = if limit == 0 || limit > MAX_LINES { MAX_LINES } else { limit };
+        let effective_limit = if limit == 0 || limit > MAX_LINES {
+            MAX_LINES
+        } else {
+            limit
+        };
 
         let lines: Vec<&str> = content.lines().collect();
         let total = lines.len();

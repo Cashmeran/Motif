@@ -1,8 +1,8 @@
 //! Provider streaming and Anthropic format tests using mock HTTP.
 
+use motif::*;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
-use motif::*;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 
@@ -34,7 +34,10 @@ impl CapturingServer {
             }
         });
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-        Self { addr, body_checks: checks }
+        Self {
+            addr,
+            body_checks: checks,
+        }
     }
 
     fn request_bodies(&self) -> Vec<String> {
@@ -50,7 +53,10 @@ async fn test_stream_content_deltas() {
     let sse = "data: {\"choices\":[{\"delta\":{\"content\":\"Hello\"}}]}\n\ndata: {\"choices\":[{\"delta\":{\"content\":\" World\"}}]}\n\ndata: [DONE]\n\n";
     let server = CapturingServer::new(sse.to_string()).await;
     let provider = OpenAIProvider::new(&server.addr, "sk-test", "test-model");
-    let stream = provider.call_stream(&[Message::user("hi")], &[]).await.unwrap();
+    let stream = provider
+        .call_stream(&[Message::user("hi")], &[])
+        .await
+        .unwrap();
     let mut rx = stream.receiver;
     let mut content = String::new();
     loop {
@@ -69,11 +75,16 @@ async fn test_stream_finish_reason() {
     let sse = "data: {\"choices\":[{\"delta\":{\"content\":\"x\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n";
     let server = CapturingServer::new(sse.to_string()).await;
     let provider = OpenAIProvider::new(&server.addr, "sk-test", "test-model");
-    let stream = provider.call_stream(&[Message::user("hi")], &[]).await.unwrap();
+    let stream = provider
+        .call_stream(&[Message::user("hi")], &[])
+        .await
+        .unwrap();
     let mut finish_seen = false;
     let mut rx = stream.receiver;
     while let Some(event) = rx.recv().await {
-        if matches!(event, StreamEvent::Finish(_)) { finish_seen = true; }
+        if matches!(event, StreamEvent::Finish(_)) {
+            finish_seen = true;
+        }
     }
     assert!(finish_seen, "Should receive Finish event");
 }
@@ -95,7 +106,10 @@ async fn test_anthropic_tool_use_response() {
     let body = r#"{"id":"msg_2","type":"message","role":"assistant","content":[{"type":"tool_use","id":"toolu_1","name":"search","input":{"query":"Rust"}}],"stop_reason":"tool_use","usage":{"input_tokens":20,"output_tokens":10}}"#;
     let server = CapturingServer::new(body.to_string()).await;
     let provider = OpenAIProvider::new(&server.addr, "sk-test", "test-model").with_anthropic();
-    let result = provider.call(&[Message::user("search Rust")], &[]).await.unwrap();
+    let result = provider
+        .call(&[Message::user("search Rust")], &[])
+        .await
+        .unwrap();
     assert!(result.message.content.is_empty());
     let tc = result.message.tool_calls.unwrap();
     assert_eq!(tc.len(), 1);
@@ -109,12 +123,24 @@ async fn test_anthropic_system_prompt_top_level() {
     let body = r#"{"id":"msg_3","type":"message","role":"assistant","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{"input_tokens":10,"output_tokens":2}}"#;
     let server = CapturingServer::new(body.to_string()).await;
     let provider = OpenAIProvider::new(&server.addr, "sk-test", "test-model").with_anthropic();
-    provider.call(&[Message::system("you are helpful"), Message::user("hi")], &[]).await.unwrap();
+    provider
+        .call(
+            &[Message::system("you are helpful"), Message::user("hi")],
+            &[],
+        )
+        .await
+        .unwrap();
     // Verify the request body has `system` field at top level, not in messages
     let bodies = server.request_bodies();
     let req_body = bodies.last().unwrap();
-    assert!(req_body.contains("\"system\""), "Anthropic format: system should be top-level field");
-    assert!(req_body.contains("you are helpful"), "System prompt should be in request body");
+    assert!(
+        req_body.contains("\"system\""),
+        "Anthropic format: system should be top-level field"
+    );
+    assert!(
+        req_body.contains("you are helpful"),
+        "System prompt should be in request body"
+    );
 }
 
 #[tokio::test]
@@ -122,11 +148,21 @@ async fn test_anthropic_tools_as_input_schema() {
     let body = r#"{"id":"msg_4","type":"message","role":"assistant","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{"input_tokens":10,"output_tokens":2}}"#;
     let server = CapturingServer::new(body.to_string()).await;
     let provider = OpenAIProvider::new(&server.addr, "sk-test", "test-model").with_anthropic();
-    let tool_def = ToolDefinition::new("search", "Search the web", Parameters::new(serde_json::json!({
-        "type": "object", "properties": {"q": {"type": "string"}}, "required": ["q"]
-    })));
-    provider.call(&[Message::user("hi")], &[tool_def]).await.unwrap();
+    let tool_def = ToolDefinition::new(
+        "search",
+        "Search the web",
+        Parameters::new(serde_json::json!({
+            "type": "object", "properties": {"q": {"type": "string"}}, "required": ["q"]
+        })),
+    );
+    provider
+        .call(&[Message::user("hi")], &[tool_def])
+        .await
+        .unwrap();
     let bodies = server.request_bodies();
     let req_body = bodies.last().unwrap();
-    assert!(req_body.contains("input_schema"), "Anthropic tools use input_schema not parameters");
+    assert!(
+        req_body.contains("input_schema"),
+        "Anthropic tools use input_schema not parameters"
+    );
 }

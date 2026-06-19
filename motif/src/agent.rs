@@ -4,7 +4,8 @@ use crate::prompt::{self, Prompt, PromptBuilder};
 use crate::provider::LLMProvider;
 use crate::tool::{Executor, RegisteredTool, ToolExecutor};
 use crate::types::{
-    AssistantMessage, FinishReason, LLMResponse, Message, SystemMessage, TimedMessage, ToolDefinition,
+    AssistantMessage, FinishReason, LLMResponse, Message, SystemMessage, TimedMessage,
+    ToolDefinition,
 };
 use std::future::Future;
 use std::sync::Arc;
@@ -361,7 +362,10 @@ impl Agent {
 
         // Check stop condition — hooks can override exit (Ralph Loop gate)
         let mut should_stop = self.stop_condition.should_stop(
-            &response, self.history.get_all(), &self.recent_tool_calls);
+            &response,
+            self.history.get_all(),
+            &self.recent_tool_calls,
+        );
         for hook in &self.hooks {
             match hook.on_stop_check(&mut hook_ctx, should_stop).await {
                 Ok(false) => should_stop = false,
@@ -390,7 +394,9 @@ impl Agent {
             if !is_empty && self.length_continues < self.max_length_continues {
                 self.length_continues += 1;
                 let msg = TimedMessage::new(Message::user("continue"));
-                if self.filter_message(&msg).await { self.history.add(msg); }
+                if self.filter_message(&msg).await {
+                    self.history.add(msg);
+                }
                 return true;
             }
         } else {
@@ -454,7 +460,13 @@ impl Agent {
                     .collect();
                 let fallback = drained
                     .last()
-                    .and_then(|tm| if let Message::Assistant(ref a) = tm.message { Some(a.content.clone()) } else { None })
+                    .and_then(|tm| {
+                        if let Message::Assistant(ref a) = tm.message {
+                            Some(a.content.clone())
+                        } else {
+                            None
+                        }
+                    })
                     .unwrap_or_else(|| "Max iterations reached".to_string());
                 run_ctx.final_content = Some(fallback.clone());
                 self.exit_cleanup(&mut run_ctx).await;
@@ -491,9 +503,15 @@ impl Agent {
     pub async fn chat(&mut self, content: impl Into<String>) -> crate::Result<String> {
         let content = content.into();
         let ctx = prompt::runtime_context(&self.model);
-        let full = if content.is_empty() { ctx } else { format!("{}\n{}", ctx, content) };
+        let full = if content.is_empty() {
+            ctx
+        } else {
+            format!("{}\n{}", ctx, content)
+        };
         let msg = TimedMessage::new(Message::user(full));
-        if self.filter_message(&msg).await { self.history.add(msg); }
+        if self.filter_message(&msg).await {
+            self.history.add(msg);
+        }
         self.run().await
     }
 
@@ -507,9 +525,15 @@ impl Agent {
     pub async fn chat_stream(&mut self, content: impl Into<String>) -> crate::Result<String> {
         let content = content.into();
         let ctx = prompt::runtime_context(&self.model);
-        let full = if content.is_empty() { ctx } else { format!("{}\n{}", ctx, content) };
+        let full = if content.is_empty() {
+            ctx
+        } else {
+            format!("{}\n{}", ctx, content)
+        };
         let msg = TimedMessage::new(Message::user(full));
-        if self.filter_message(&msg).await { self.history.add(msg); }
+        if self.filter_message(&msg).await {
+            self.history.add(msg);
+        }
         self.run_stream().await
     }
 
@@ -524,15 +548,25 @@ impl Agent {
         }
         let mut iterations = 0;
         loop {
-            if self.max_iterations > 0 && iterations >= self.max_iterations { break; }
+            if self.max_iterations > 0 && iterations >= self.max_iterations {
+                break;
+            }
             iterations += 1;
 
             // Build prompt + messages (same as step())
-            let extensions: Vec<String> = self.prompt_builders.iter().filter_map(|b| b.build()).collect();
+            let extensions: Vec<String> = self
+                .prompt_builders
+                .iter()
+                .filter_map(|b| b.build())
+                .collect();
             let prompt_text = self.prompt.build(&extensions);
-            let system_msg = Message::System(SystemMessage { content: prompt_text });
+            let system_msg = Message::System(SystemMessage {
+                content: prompt_text,
+            });
             let mut turn_messages = vec![system_msg];
-            for timed in self.history.get_all() { turn_messages.push(timed.message.clone()); }
+            for timed in self.history.get_all() {
+                turn_messages.push(timed.message.clone());
+            }
 
             self.step_count += 1;
             let mut hook_ctx = HookContext::new(self.step_count, self.history.get_all().to_vec());
@@ -544,7 +578,10 @@ impl Agent {
 
             // Use streaming provider call
             let llm_start = std::time::Instant::now();
-            let stream = self.provider.call_stream(&turn_messages, &self.tool_definitions).await?;
+            let stream = self
+                .provider
+                .call_stream(&turn_messages, &self.tool_definitions)
+                .await?;
             let mut full_content = String::new();
             let mut finish_reason = FinishReason::Stop;
 
@@ -576,15 +613,24 @@ impl Agent {
             drop(receiver); // stream is consumed
 
             let response = LLMResponse {
-                message: AssistantMessage { content: full_content, tool_calls: None },
+                message: AssistantMessage {
+                    content: full_content,
+                    tool_calls: None,
+                },
                 finish_reason,
                 usage: None,
             };
 
-            if let Some(ref usage) = response.usage { self.total_tokens += usage.total_tokens as u64; }
+            if let Some(ref usage) = response.usage {
+                self.total_tokens += usage.total_tokens as u64;
+            }
 
             // Signal end of streaming phase
-            let has_tools = response.message.tool_calls.as_ref().is_some_and(|c| !c.is_empty());
+            let has_tools = response
+                .message
+                .tool_calls
+                .as_ref()
+                .is_some_and(|c| !c.is_empty());
             for hook in &self.hooks {
                 if let Err(e) = hook.on_stream_end(has_tools).await {
                     tracing::warn!("Hook.on_stream_end error: {}", e);
@@ -593,9 +639,12 @@ impl Agent {
 
             let assoc = TimedMessage {
                 message: Message::Assistant(response.message.clone()),
-                timestamp: std::time::SystemTime::now(), elapsed,
+                timestamp: std::time::SystemTime::now(),
+                elapsed,
             };
-            if self.filter_message(&assoc).await { self.history.add(assoc); }
+            if self.filter_message(&assoc).await {
+                self.history.add(assoc);
+            }
             hook_ctx.response = Some(response.clone());
 
             // Execute tools if any
@@ -603,28 +652,41 @@ impl Agent {
                 if !calls.is_empty() {
                     hook_ctx.tool_calls = calls.clone();
                     for hook in &self.hooks {
-                        if let Err(e) = hook.before_tools(&mut hook_ctx).await { tracing::warn!("Hook.before_tools error: {}", e); }
+                        if let Err(e) = hook.before_tools(&mut hook_ctx).await {
+                            tracing::warn!("Hook.before_tools error: {}", e);
+                        }
                     }
                     let results = self.executor.execute(calls.clone()).await;
                     hook_ctx.tool_results = results.clone();
                     for result in &results {
                         let tm = TimedMessage {
                             message: Message::Tool(result.tool_message.clone()),
-                            timestamp: result.timestamp, elapsed: result.elapsed,
+                            timestamp: result.timestamp,
+                            elapsed: result.elapsed,
                         };
-                        if self.filter_message(&tm).await { self.history.add(tm); }
+                        if self.filter_message(&tm).await {
+                            self.history.add(tm);
+                        }
                     }
                     for hook in &self.hooks {
-                        if let Err(e) = hook.after_tools(&mut hook_ctx).await { tracing::warn!("Hook.after_tools error: {}", e); }
+                        if let Err(e) = hook.after_tools(&mut hook_ctx).await {
+                            tracing::warn!("Hook.after_tools error: {}", e);
+                        }
                     }
                 }
             }
 
             // Recovery
-            if self.try_recover(&response).await { continue; }
+            if self.try_recover(&response).await {
+                continue;
+            }
 
             // Stop check with hooks
-            let mut should_stop = self.stop_condition.should_stop(&response, self.history.get_all(), &self.recent_tool_calls);
+            let mut should_stop = self.stop_condition.should_stop(
+                &response,
+                self.history.get_all(),
+                &self.recent_tool_calls,
+            );
             for hook in &self.hooks {
                 match hook.on_stop_check(&mut hook_ctx, should_stop).await {
                     Ok(false) => should_stop = false,
@@ -635,7 +697,9 @@ impl Agent {
             if should_stop {
                 let finalized = {
                     let mut c = response.message.content.clone();
-                    for hook in &self.hooks { c = hook.finalize_content(&c); }
+                    for hook in &self.hooks {
+                        c = hook.finalize_content(&c);
+                    }
                     c
                 };
                 run_ctx.final_content = Some(finalized.clone());
@@ -664,4 +728,3 @@ impl Agent {
         self.history.as_ref()
     }
 }
-

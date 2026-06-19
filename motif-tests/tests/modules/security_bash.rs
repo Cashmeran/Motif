@@ -34,6 +34,9 @@ fn test_bash_dollar_question() {
 #[test]
 fn test_bash_single_quote_safe() {
     let (_, tool) = motif_tools::bash::register().into_parts();
-    let result = common::call_tool(&tool, r#"{"command":"awk '{print $1}' /dev/null","timeout_ms":5000}"#);
+    let result = common::call_tool(
+        &tool,
+        r#"{"command":"awk '{print $1}' /dev/null","timeout_ms":5000}"#,
+    );
     assert!(!result.contains("not allowed"), "Got: {}", result);
 }

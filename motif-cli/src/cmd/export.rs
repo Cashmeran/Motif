@@ -7,8 +7,12 @@ pub struct Export;
 
 #[async_trait::async_trait]
 impl Command for Export {
-    fn name(&self) -> &'static str { "export" }
-    fn desc(&self) -> &'static str { "Export session as JSON" }
+    fn name(&self) -> &'static str {
+        "export"
+    }
+    fn desc(&self) -> &'static str {
+        "Export session as JSON"
+    }
     async fn run(&self, _: &mut Agent, args: &str, _: &Config, _: &Registry) -> Outcome {
         let id = args.trim();
         if id.is_empty() {

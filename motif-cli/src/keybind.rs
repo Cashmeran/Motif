@@ -19,10 +19,22 @@ pub struct KeyRegistry {
     bindings: Vec<Binding>,
 }
 
-impl KeyRegistry {
-    pub fn new() -> Self { Self { bindings: vec![] } }
+impl Default for KeyRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
-    pub fn add(mut self, key_name: &'static str, action: fn(&mut Agent, &Config, &CmdRegistry) -> Outcome) -> Self {
+impl KeyRegistry {
+    pub fn new() -> Self {
+        Self { bindings: vec![] }
+    }
+
+    pub fn add(
+        mut self,
+        key_name: &'static str,
+        action: fn(&mut Agent, &Config, &CmdRegistry) -> Outcome,
+    ) -> Self {
         self.bindings.push(Binding { key_name, action });
         self
     }

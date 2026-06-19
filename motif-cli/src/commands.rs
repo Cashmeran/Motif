@@ -1,7 +1,7 @@
 //! Command registry. Each slash-command lives in `cmd/`.
 
-use crate::config::Config;
 use crate::cmd;
+use crate::config::Config;
 use motif::Agent;
 use std::collections::HashMap;
 
@@ -31,7 +31,9 @@ impl Default for Registry {
 
 impl Registry {
     pub fn new() -> Self {
-        let mut r = Self { cmds: HashMap::new() };
+        let mut r = Self {
+            cmds: HashMap::new(),
+        };
         r.add(cmd::help::Help);
         r.add(cmd::clear::Clear);
         r.add(cmd::status::Status);

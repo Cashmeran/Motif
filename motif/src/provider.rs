@@ -6,9 +6,17 @@ use serde::Deserialize;
 /// LLM Provider abstraction with streaming support.
 #[async_trait]
 pub trait LLMProvider: Send + Sync {
-    async fn call(&self, messages: &[Message], tools: &[ToolDefinition]) -> crate::Result<LLMResponse>;
+    async fn call(
+        &self,
+        messages: &[Message],
+        tools: &[ToolDefinition],
+    ) -> crate::Result<LLMResponse>;
 
-    async fn call_stream(&self, messages: &[Message], tools: &[ToolDefinition]) -> crate::Result<LLMStream> {
+    async fn call_stream(
+        &self,
+        messages: &[Message],
+        tools: &[ToolDefinition],
+    ) -> crate::Result<LLMStream> {
         let response = self.call(messages, tools).await?;
         let (tx, rx) = tokio::sync::mpsc::channel(2);
         let content = response.message.content.clone();
@@ -146,13 +154,22 @@ impl OpenAIProvider {
     }
 
     /// Set max retry attempts for transient errors (default 2).
-    pub fn with_retry(mut self, max: usize) -> Self { self.max_retries = max; self }
+    pub fn with_retry(mut self, max: usize) -> Self {
+        self.max_retries = max;
+        self
+    }
 
     /// Enable DeepSeek thinking mode (reasoning_effort: "high" or "max").
-    pub fn with_thinking(mut self, effort: &str) -> Self { self.thinking_effort = Some(effort.to_string()); self }
+    pub fn with_thinking(mut self, effort: &str) -> Self {
+        self.thinking_effort = Some(effort.to_string());
+        self
+    }
 
     /// Use Anthropic Messages API format (DeepSeek `/anthropic/messages` endpoint).
-    pub fn with_anthropic(mut self) -> Self { self.format = ApiFormat::Anthropic; self }
+    pub fn with_anthropic(mut self) -> Self {
+        self.format = ApiFormat::Anthropic;
+        self
+    }
 
     /// Send a POST with retry. On success returns the reqwest Response for parsing.
     async fn post_with_retry(&self, body: &serde_json::Value) -> crate::Result<reqwest::Response> {
@@ -169,7 +186,9 @@ impl OpenAIProvider {
                 ))
                 .await;
             }
-            let mut req = self.client.post(&url)
+            let mut req = self
+                .client
+                .post(&url)
                 .header("Content-Type", "application/json")
                 .json(body);
             if self.format == ApiFormat::Anthropic {
@@ -179,7 +198,10 @@ impl OpenAIProvider {
             }
             let response = match req.send().await {
                 Ok(r) => r,
-                Err(e) => { last_err = Some(e.into()); continue; }
+                Err(e) => {
+                    last_err = Some(e.into());
+                    continue;
+                }
             };
             let status = response.status();
             if !status.is_success() {
@@ -255,20 +277,37 @@ impl OpenAIProvider {
         if stream {
             body["stream"] = serde_json::Value::Bool(true);
         }
-        if !tools.is_empty() { body["tools"] = serde_json::to_value(tools).unwrap(); }
+        if !tools.is_empty() {
+            body["tools"] = serde_json::to_value(tools).unwrap();
+        }
         if let Some(ref effort) = self.thinking_effort {
             body["thinking"] = serde_json::json!({"type": "enabled"});
             body["reasoning_effort"] = serde_json::Value::String(effort.clone());
         }
-        for (k, v) in &self.extra_body { body[k] = v.clone(); }
+        for (k, v) in &self.extra_body {
+            body[k] = v.clone();
+        }
         body
     }
 
-    fn build_anthropic_body(&self, messages: &[Message], tools: &[ToolDefinition], stream: bool) -> serde_json::Value {
+    fn build_anthropic_body(
+        &self,
+        messages: &[Message],
+        tools: &[ToolDefinition],
+        stream: bool,
+    ) -> serde_json::Value {
         // System prompt: top-level `system` field (not in messages array)
-        let system = messages.iter().filter_map(|m| {
-            if let Message::System(ref s) = m { Some(s.content.as_str()) } else { None }
-        }).collect::<Vec<_>>().join("\n\n");
+        let system = messages
+            .iter()
+            .filter_map(|m| {
+                if let Message::System(ref s) = m {
+                    Some(s.content.as_str())
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n\n");
 
         // Conversation messages: Anthropic format uses content blocks
         let anthropic_msgs: Vec<serde_json::Value> = messages.iter()
@@ -308,8 +347,12 @@ impl OpenAIProvider {
             "max_tokens": 4096,
             "messages": anthropic_msgs,
         });
-        if stream { body["stream"] = serde_json::Value::Bool(true); }
-        if !system.is_empty() { body["system"] = serde_json::Value::String(system); }
+        if stream {
+            body["stream"] = serde_json::Value::Bool(true);
+        }
+        if !system.is_empty() {
+            body["system"] = serde_json::Value::String(system);
+        }
         if !tools.is_empty() {
             body["tools"] = serde_json::json!(tools.iter().map(|t| serde_json::json!({
                 "name": t.function.name,
@@ -322,7 +365,9 @@ impl OpenAIProvider {
             body["thinking"] = serde_json::json!({"type": "enabled"});
             body["output_config"] = serde_json::json!({"effort": effort});
         }
-        for (k, v) in &self.extra_body { body[k] = v.clone(); }
+        for (k, v) in &self.extra_body {
+            body[k] = v.clone();
+        }
         body
     }
 
@@ -332,14 +377,22 @@ impl OpenAIProvider {
         let mut tool_calls = Vec::new();
         for block in &resp.content {
             match block.content_type.as_str() {
-                "text" => { if let Some(ref t) = block.text { content.push_str(t); } }
+                "text" => {
+                    if let Some(ref t) = block.text {
+                        content.push_str(t);
+                    }
+                }
                 "tool_use" => {
                     tool_calls.push(crate::types::ToolCall {
                         id: block.id.clone().unwrap_or_default(),
                         call_type: "function".to_string(),
                         function: crate::types::FunctionCall {
                             name: block.name.clone().unwrap_or_default(),
-                            arguments: block.input.as_ref().map(|v| v.to_string()).unwrap_or_default(),
+                            arguments: block
+                                .input
+                                .as_ref()
+                                .map(|v| v.to_string())
+                                .unwrap_or_default(),
                         },
                     });
                 }
@@ -349,7 +402,11 @@ impl OpenAIProvider {
         Ok(LLMResponse {
             message: crate::types::AssistantMessage {
                 content,
-                tool_calls: if tool_calls.is_empty() { None } else { Some(tool_calls) },
+                tool_calls: if tool_calls.is_empty() {
+                    None
+                } else {
+                    Some(tool_calls)
+                },
             },
             finish_reason: match resp.stop_reason.as_deref() {
                 Some("end_turn") => FinishReason::Stop,
@@ -429,10 +486,16 @@ impl LLMProvider for OpenAIProvider {
                     }
                     if let Some(data) = line.strip_prefix("data: ") {
                         if let Ok(json) = serde_json::from_str::<serde_json::Value>(data) {
-                            if let Some(r) = json["choices"][0]["delta"]["reasoning_content"].as_str() {
-                            if !r.is_empty() && tx.send(StreamEvent::Thinking(r.to_string())).await.is_err() { return; }
-                        }
-                        if let Some(c) = json["choices"][0]["delta"]["content"].as_str() {
+                            if let Some(r) =
+                                json["choices"][0]["delta"]["reasoning_content"].as_str()
+                            {
+                                if !r.is_empty()
+                                    && tx.send(StreamEvent::Thinking(r.to_string())).await.is_err()
+                                {
+                                    return;
+                                }
+                            }
+                            if let Some(c) = json["choices"][0]["delta"]["content"].as_str() {
                                 if !c.is_empty()
                                     && tx.send(StreamEvent::Content(c.to_string())).await.is_err()
                                 {
@@ -460,4 +523,3 @@ impl LLMProvider for OpenAIProvider {
         Ok(LLMStream { receiver: rx })
     }
 }
-

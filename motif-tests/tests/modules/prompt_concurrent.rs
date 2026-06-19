@@ -25,8 +25,9 @@ async fn test_prompt_freezes_tool_definitions() {
     let mut agent = Agent::new(common::MockProvider::new(vec![
         common::tool_call("check", r#"{"v":"1"}"#),
         common::text("done"),
-    ])).model("test").tool(ToolDef::new("check", "Check tool")
-        .build(|_: String| async { "ok".to_string() }));
+    ]))
+    .model("test")
+    .tool(ToolDef::new("check", "Check tool").build(|_: String| async { "ok".to_string() }));
     let r = agent.chat("use tool").await.unwrap();
     assert_eq!(r, "done");
 }

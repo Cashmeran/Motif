@@ -45,7 +45,9 @@ async fn main() {
         match editor.readline("> ") {
             Ok(line) => {
                 let trimmed = line.trim().to_string();
-                if trimmed.is_empty() { continue; }
+                if trimmed.is_empty() {
+                    continue;
+                }
 
                 match reg.handle(&line, &mut agent, &cfg).await {
                     Outcome::Continue => {}
@@ -64,9 +66,15 @@ async fn main() {
                     }
                 }
             }
-            Err(ReadlineError::Interrupted) => { println!("^C"); continue; }
+            Err(ReadlineError::Interrupted) => {
+                println!("^C");
+                continue;
+            }
             Err(ReadlineError::Eof) => break,
-            Err(e) => { eprintln!("Error: {}", e); break; }
+            Err(e) => {
+                eprintln!("Error: {}", e);
+                break;
+            }
         }
     }
 }

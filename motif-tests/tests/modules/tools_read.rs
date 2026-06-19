@@ -20,7 +20,10 @@ fn test_read_basic() {
 fn test_read_offset_limit() {
     fs::write("_t_rd_off.txt", "a\nb\nc\nd\ne\n").unwrap();
     let (_, tool) = motif_tools::read::register().into_parts();
-    let result = common::call_tool(&tool, r#"{"file_path":"_t_rd_off.txt","offset":2,"limit":2}"#);
+    let result = common::call_tool(
+        &tool,
+        r#"{"file_path":"_t_rd_off.txt","offset":2,"limit":2}"#,
+    );
     assert!(result.contains("c"), "Expected line c: {}", result);
     assert!(result.contains("d"), "Expected line d: {}", result);
     fs::remove_file("_t_rd_off.txt").ok();

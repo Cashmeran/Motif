@@ -6,8 +6,12 @@ pub struct Help;
 
 #[async_trait::async_trait]
 impl Command for Help {
-    fn name(&self) -> &'static str { "help" }
-    fn desc(&self) -> &'static str { "Show commands" }
+    fn name(&self) -> &'static str {
+        "help"
+    }
+    fn desc(&self) -> &'static str {
+        "Show commands"
+    }
     async fn run(&self, _: &mut Agent, _: &str, _: &Config, reg: &Registry) -> Outcome {
         println!("Commands:");
         for (name, desc) in reg.list() {

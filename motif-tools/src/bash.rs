@@ -2,8 +2,8 @@
 
 use motif::RegisteredTool;
 use motif::ToolDef;
-use tokio::process::Command;
 use std::process::Stdio;
+use tokio::process::Command;
 
 const DEFAULT_TIMEOUT_MS: u64 = 120_000; // 2 minutes
 const MAX_TIMEOUT_MS: u64 = 300_000; // 5 minutes
@@ -11,15 +11,28 @@ const MAX_OUTPUT_CHARS: usize = 50_000;
 
 /// Commands that require explicit confirmation. Checked with word-boundary.
 const DESTRUCTIVE_SUBSTRINGS: &[&str] = &[
-    "rm -rf", "rm -r", "rmdir",
-    "sudo ", "su ",
+    "rm -rf",
+    "rm -r",
+    "rmdir",
+    "sudo ",
+    "su ",
     "chmod 777",
-    "mkfs.", "dd if=",
+    "mkfs.",
+    "dd if=",
     ":(){ :|:& };:", // fork bomb
-    "> /dev/sda", "> /dev/hda",
-    "shutdown", "reboot", "halt", "poweroff",
-    "git push --force", "git push -f",
-    "zmodload", "emulate", "sysopen", "ztcp", "zpty",
+    "> /dev/sda",
+    "> /dev/hda",
+    "shutdown",
+    "reboot",
+    "halt",
+    "poweroff",
+    "git push --force",
+    "git push -f",
+    "zmodload",
+    "emulate",
+    "sysopen",
+    "ztcp",
+    "zpty",
 ];
 
 pub fn register() -> RegisteredTool {
@@ -41,7 +54,9 @@ fn bash_impl(args: String) -> std::pin::Pin<Box<dyn std::future::Future<Output =
     Box::pin(async move {
         let v: serde_json::Value = serde_json::from_str(&args).unwrap_or_default();
         let command = v["command"].as_str().unwrap_or("").to_string();
-        if command.is_empty() { return "Error: 'command' is required".to_string(); }
+        if command.is_empty() {
+            return "Error: 'command' is required".to_string();
+        }
 
         // Security: check destructive patterns (case-insensitive substring)
         let cmd_lower = command.to_lowercase();
@@ -56,7 +71,10 @@ fn bash_impl(args: String) -> std::pin::Pin<Box<dyn std::future::Future<Output =
             return issue;
         }
 
-        let timeout_ms = v["timeout_ms"].as_u64().unwrap_or(DEFAULT_TIMEOUT_MS).min(MAX_TIMEOUT_MS);
+        let timeout_ms = v["timeout_ms"]
+            .as_u64()
+            .unwrap_or(DEFAULT_TIMEOUT_MS)
+            .min(MAX_TIMEOUT_MS);
         let work_dir = v["work_dir"].as_str().map(|s| s.to_string());
 
         let mut cmd = if cfg!(target_os = "windows") {
@@ -99,15 +117,24 @@ fn bash_impl(args: String) -> std::pin::Pin<Box<dyn std::future::Future<Output =
         let mut out = String::new();
         let stdout_str = String::from_utf8_lossy(&output.stdout);
         let stderr_str = String::from_utf8_lossy(&output.stderr);
-        let exit_code = output.status.code().map(|c| c.to_string()).unwrap_or_else(|| "signal".into());
+        let exit_code = output
+            .status
+            .code()
+            .map(|c| c.to_string())
+            .unwrap_or_else(|| "signal".into());
 
         if !stdout_str.is_empty() {
             let display = truncate_str(&stdout_str, MAX_OUTPUT_CHARS);
             out.push_str(&display);
         }
         if !stderr_str.is_empty() {
-            if !out.is_empty() { out.push('\n'); }
-            let display = truncate_str(&format!("[stderr]\n{}", stderr_str), MAX_OUTPUT_CHARS - out.len());
+            if !out.is_empty() {
+                out.push('\n');
+            }
+            let display = truncate_str(
+                &format!("[stderr]\n{}", stderr_str),
+                MAX_OUTPUT_CHARS - out.len(),
+            );
             out.push_str(&display);
         }
         if out.is_empty() {
@@ -127,7 +154,9 @@ fn bash_impl(args: String) -> std::pin::Pin<Box<dyn std::future::Future<Output =
 }
 
 fn truncate_str(s: &str, max_chars: usize) -> String {
-    if s.len() <= max_chars { return s.to_string(); }
+    if s.len() <= max_chars {
+        return s.to_string();
+    }
     let mut t = s[..max_chars].to_string();
     t.push_str("\n(truncated)");
     t
@@ -143,21 +172,43 @@ fn detect_unquoted_metachars(command: &str) -> Option<String> {
     let bytes = command.as_bytes();
 
     for (i, ch) in command.char_indices() {
-        if escaped { escaped = false; continue; }
-        if ch == '\\' && !in_single { escaped = true; continue; }
-        if ch == '\'' && !in_double { in_single = !in_single; continue; }
-        if ch == '"' && !in_single { in_double = !in_double; continue; }
-        if in_single { continue; }
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if ch == '\\' && !in_single {
+            escaped = true;
+            continue;
+        }
+        if ch == '\'' && !in_double {
+            in_single = !in_single;
+            continue;
+        }
+        if ch == '"' && !in_single {
+            in_double = !in_double;
+            continue;
+        }
+        if in_single {
+            continue;
+        }
 
         // Unquoted `$` followed by identifier/brace/paren/?
         if ch == '$' {
             if let Some(&next) = bytes.get(i + ch.len_utf8()) {
-                if next == b'(' || next == b'{'
-                    || next.is_ascii_alphabetic() || next == b'_'
-                    || next == b'?' || next == b'#' || next == b'@'
-                    || next == b'*' || next == b'!'
+                if next == b'('
+                    || next == b'{'
+                    || next.is_ascii_alphabetic()
+                    || next == b'_'
+                    || next == b'?'
+                    || next == b'#'
+                    || next == b'@'
+                    || next == b'*'
+                    || next == b'!'
                 {
-                    return Some("Unquoted shell expansion ($VAR / $(cmd) / ${}) is not allowed.".to_string());
+                    return Some(
+                        "Unquoted shell expansion ($VAR / $(cmd) / ${}) is not allowed."
+                            .to_string(),
+                    );
                 }
             }
         }
@@ -181,4 +232,3 @@ fn writeln_debug(buf: &mut String, s: &str) -> std::fmt::Result {
     buf.push_str(s);
     Ok(())
 }
-

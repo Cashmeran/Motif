@@ -7,11 +7,18 @@ pub struct List;
 
 #[async_trait::async_trait]
 impl Command for List {
-    fn name(&self) -> &'static str { "list" }
-    fn desc(&self) -> &'static str { "List sessions" }
+    fn name(&self) -> &'static str {
+        "list"
+    }
+    fn desc(&self) -> &'static str {
+        "List sessions"
+    }
     async fn run(&self, _: &mut Agent, _: &str, _: &Config, _: &Registry) -> Outcome {
         let sessions = FileHistory::list();
-        if sessions.is_empty() { println!("No sessions."); return Outcome::Continue; }
+        if sessions.is_empty() {
+            println!("No sessions.");
+            return Outcome::Continue;
+        }
         for s in &sessions {
             let id = s["id"].as_str().unwrap_or("?");
             let date = s["date"].as_str().unwrap_or("?");

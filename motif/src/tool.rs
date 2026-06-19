@@ -402,4 +402,3 @@ impl RegisteredTool {
         (self.definition, self.tool)
     }
 }
-

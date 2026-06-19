@@ -7,8 +7,12 @@ pub struct Delete;
 
 #[async_trait::async_trait]
 impl Command for Delete {
-    fn name(&self) -> &'static str { "delete" }
-    fn desc(&self) -> &'static str { "Delete a session by ID" }
+    fn name(&self) -> &'static str {
+        "delete"
+    }
+    fn desc(&self) -> &'static str {
+        "Delete a session by ID"
+    }
     async fn run(&self, _: &mut Agent, args: &str, _: &Config, _: &Registry) -> Outcome {
         let id = args.trim();
         if id.is_empty() {

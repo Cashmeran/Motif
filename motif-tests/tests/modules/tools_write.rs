@@ -10,7 +10,10 @@ use std::sync::Arc;
 #[test]
 fn test_write_and_read() {
     let (_, tool) = motif_tools::write::register().into_parts();
-    let result = common::call_tool(&tool, r#"{"file_path":"_t_wr.txt","content":"hello world"}"#);
+    let result = common::call_tool(
+        &tool,
+        r#"{"file_path":"_t_wr.txt","content":"hello world"}"#,
+    );
     assert!(result.contains("Wrote") || result.contains("bytes"));
     let content = fs::read_to_string("_t_wr.txt").unwrap();
     assert_eq!(content, "hello world");
@@ -29,7 +32,10 @@ fn test_write_empty_file() {
 #[test]
 fn test_write_parent_directory_creation() {
     let (_, tool) = motif_tools::write::register().into_parts();
-    common::call_tool(&tool, r#"{"file_path":"_t_deep/deep2/file.txt","content":"nested"}"#);
+    common::call_tool(
+        &tool,
+        r#"{"file_path":"_t_deep/deep2/file.txt","content":"nested"}"#,
+    );
     assert!(Path::new("_t_deep/deep2/file.txt").exists());
     let content = fs::read_to_string("_t_deep/deep2/file.txt").unwrap();
     assert_eq!(content, "nested");

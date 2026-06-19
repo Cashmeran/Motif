@@ -1,8 +1,8 @@
 //! Combined search tool: regex content search (grep) + filename matching (glob).
 
+use crate::{is_binary_extension, is_skip_dir, paginate};
 use motif::RegisteredTool;
 use motif::ToolDef;
-use crate::{is_binary_extension, is_skip_dir, paginate};
 use regex::RegexBuilder;
 use std::fmt::Write as _;
 use std::fs;
@@ -13,7 +13,10 @@ const DEFAULT_HEAD_LIMIT: usize = 250;
 
 pub fn register() -> RegisteredTool {
     ToolDef::new("search", "Search file content (regex) or filenames (glob)")
-        .param::<String>("query", "Search pattern. Regex for content modes, glob for filename mode")
+        .param::<String>(
+            "query",
+            "Search pattern. Regex for content modes, glob for filename mode",
+        )
         .param::<String>(
             "mode",
             r#"Search mode:
@@ -37,7 +40,9 @@ pub fn register() -> RegisteredTool {
         .build(search_impl)
 }
 
-fn search_impl(args: String) -> std::pin::Pin<Box<dyn std::future::Future<Output = String> + Send>> {
+fn search_impl(
+    args: String,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = String> + Send>> {
     Box::pin(async move {
         let v: serde_json::Value = serde_json::from_str(&args).unwrap_or_default();
         let query = v["query"].as_str().unwrap_or("").to_string();
@@ -46,11 +51,16 @@ fn search_impl(args: String) -> std::pin::Pin<Box<dyn std::future::Future<Output
         }
 
         let mode = v["mode"].as_str().unwrap_or("filename").to_string();
-        let path = v["path"].as_str().map(|s| s.to_string()).unwrap_or_else(|| ".".into());
+        let path = v["path"]
+            .as_str()
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| ".".into());
         let glob = v["glob"].as_str().map(|s| s.to_string());
         let ignore_case = v["ignore_case"].as_bool().unwrap_or(true);
         let multiline = v["multiline"].as_bool().unwrap_or(false);
-        let head_limit = v["head_limit"].as_u64().unwrap_or(DEFAULT_HEAD_LIMIT as u64) as usize;
+        let head_limit = v["head_limit"]
+            .as_u64()
+            .unwrap_or(DEFAULT_HEAD_LIMIT as u64) as usize;
         let offset = v["offset"].as_u64().unwrap_or(0) as usize;
         let before = v["before_context"].as_u64().unwrap_or(0) as usize;
         let after = v["after_context"].as_u64().unwrap_or(0) as usize;
@@ -63,11 +73,22 @@ fn search_impl(args: String) -> std::pin::Pin<Box<dyn std::future::Future<Output
 
         match mode.as_str() {
             "content" | "count" | "files_with_matches" => {
-                search_content(root, &query, &mode, glob, ignore_case, multiline, head_limit, offset, before, after, line_numbers).await
+                search_content(
+                    root,
+                    &query,
+                    &mode,
+                    glob,
+                    ignore_case,
+                    multiline,
+                    head_limit,
+                    offset,
+                    before,
+                    after,
+                    line_numbers,
+                )
+                .await
             }
-            _ => {
-                search_filenames(root, &query, glob, head_limit, offset).await
-            }
+            _ => search_filenames(root, &query, glob, head_limit, offset).await,
         }
     })
 }
@@ -147,7 +168,10 @@ async fn search_content(
                             let count = content.lines().filter(|l| re.is_match(l)).count();
                             if count > 0 {
                                 if let Ok(rel) = p.strip_prefix(root) {
-                                    entries.push((format!("{}: {}", rel.display(), count), SystemTime::UNIX_EPOCH));
+                                    entries.push((
+                                        format!("{}: {}", rel.display(), count),
+                                        SystemTime::UNIX_EPOCH,
+                                    ));
                                 }
                             }
                             continue;
@@ -159,9 +183,18 @@ async fn search_content(
                         while i < lines.len() {
                             if re.is_match(lines[i]) {
                                 let mut block = String::new();
-                                let ctx_start = if before > 0 { i.saturating_sub(before) } else { i };
+                                let ctx_start = if before > 0 {
+                                    i.saturating_sub(before)
+                                } else {
+                                    i
+                                };
                                 let ctx_end = (i + after + 1).min(lines.len());
-                                for (j, line) in lines.iter().enumerate().skip(ctx_start).take(ctx_end - ctx_start) {
+                                for (j, line) in lines
+                                    .iter()
+                                    .enumerate()
+                                    .skip(ctx_start)
+                                    .take(ctx_end - ctx_start)
+                                {
                                     let marker = if j == i { ">" } else { " " };
                                     if line_numbers {
                                         let _ = writeln!(block, "{}{:>6} {}", marker, j + 1, line);
@@ -181,8 +214,10 @@ async fn search_content(
                         if !file_entries.is_empty() {
                             if let Ok(rel) = p.strip_prefix(root) {
                                 let header = format!("## {}\n", rel.display());
-                                let body: String = file_entries.into_iter().map(|(s, _)| s).collect();
-                                entries.push((format!("{}{}", header, body), SystemTime::UNIX_EPOCH));
+                                let body: String =
+                                    file_entries.into_iter().map(|(s, _)| s).collect();
+                                entries
+                                    .push((format!("{}{}", header, body), SystemTime::UNIX_EPOCH));
                             }
                         }
                     }
@@ -198,14 +233,26 @@ async fn search_content(
         entries.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
     }
 
-    let (total, results) = paginate(entries.into_iter().map(|(s, _)| s).collect(), offset, head_limit);
+    let (total, results) = paginate(
+        entries.into_iter().map(|(s, _)| s).collect(),
+        offset,
+        head_limit,
+    );
     let mut out = String::new();
     for r in &results {
         out.push_str(r);
-        if !r.ends_with('\n') { out.push('\n'); }
+        if !r.ends_with('\n') {
+            out.push('\n');
+        }
     }
     if head_limit > 0 && total > offset + head_limit {
-        let _ = write!(out, "\n(Truncated: showing {}-{} of {} results. Use offset/head_limit for more.)", offset + 1, offset + results.len(), total);
+        let _ = write!(
+            out,
+            "\n(Truncated: showing {}-{} of {} results. Use offset/head_limit for more.)",
+            offset + 1,
+            offset + results.len(),
+            total
+        );
     }
     if out.is_empty() {
         out = format!("No matches found for '{}'", pattern);
@@ -226,33 +273,63 @@ async fn search_filenames(
     while !dirs.is_empty() && depth < 30 {
         let mut next = Vec::new();
         for dir in &dirs {
-            let iter = match fs::read_dir(dir) { Ok(e) => e, Err(_) => continue };
+            let iter = match fs::read_dir(dir) {
+                Ok(e) => e,
+                Err(_) => continue,
+            };
             for entry in iter.flatten() {
-                let ft = match entry.file_type() { Ok(t) => t, Err(_) => continue };
+                let ft = match entry.file_type() {
+                    Ok(t) => t,
+                    Err(_) => continue,
+                };
                 let name = entry.file_name();
                 let name_str = name.to_string_lossy();
-                if name_str.starts_with('.') || is_skip_dir(&name_str) { continue; }
+                if name_str.starts_with('.') || is_skip_dir(&name_str) {
+                    continue;
+                }
                 let p = entry.path();
-                if ft.is_dir() { if depth < 29 { next.push(p); } continue; }
-                let rel = match p.strip_prefix(root) { Ok(r) => r.display().to_string(), Err(_) => continue };
-                if !glob_matches(&p, glob_filter.as_deref()) { continue; }
-                if !simple_glob_match(pattern, &rel) { continue; }
-                let mtime = fs::metadata(&p).ok().and_then(|m| m.modified().ok()).unwrap_or(SystemTime::UNIX_EPOCH);
+                if ft.is_dir() {
+                    if depth < 29 {
+                        next.push(p);
+                    }
+                    continue;
+                }
+                let rel = match p.strip_prefix(root) {
+                    Ok(r) => r.display().to_string(),
+                    Err(_) => continue,
+                };
+                if !glob_matches(&p, glob_filter.as_deref()) {
+                    continue;
+                }
+                if !simple_glob_match(pattern, &rel) {
+                    continue;
+                }
+                let mtime = fs::metadata(&p)
+                    .ok()
+                    .and_then(|m| m.modified().ok())
+                    .unwrap_or(SystemTime::UNIX_EPOCH);
                 entries.push((rel, mtime));
             }
         }
-        dirs = next; depth += 1;
+        dirs = next;
+        depth += 1;
     }
 
     entries.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
-    let (total, results) = paginate(entries.into_iter().map(|(s, _)| s).collect(), offset, head_limit);
+    let (total, results) = paginate(
+        entries.into_iter().map(|(s, _)| s).collect(),
+        offset,
+        head_limit,
+    );
 
     let mut out = String::new();
     if results.is_empty() {
         let _ = write!(out, "No files matching '{}' found", pattern);
     } else {
         let _ = writeln!(out, "{} file(s) matching '{}':", total, pattern);
-        for r in &results { let _ = writeln!(out, "{}", r); }
+        for r in &results {
+            let _ = writeln!(out, "{}", r);
+        }
         if head_limit > 0 && total > offset + head_limit {
             let _ = write!(out, "\n(Truncated. Use offset/head_limit for more.)");
         }
@@ -271,7 +348,9 @@ fn simple_glob_match(pattern: &str, name: &str) -> bool {
         if let Some((braces, post)) = rest.split_once('}') {
             for alt in braces.split(',') {
                 let expanded = format!("{}{}{}", pre, alt.trim(), post);
-                if simple_glob_match(&expanded, &name) { return true; }
+                if simple_glob_match(&expanded, &name) {
+                    return true;
+                }
             }
             return false;
         }
@@ -298,7 +377,12 @@ fn simple_glob_match(pattern: &str, name: &str) -> bool {
         } else if chars[i] == '?' {
             regex.push_str("[^/]");
             i += 1;
-        } else if chars[i].is_ascii_alphanumeric() || chars[i] == '_' || chars[i] == '-' || chars[i] == '.' || chars[i] == '/' {
+        } else if chars[i].is_ascii_alphanumeric()
+            || chars[i] == '_'
+            || chars[i] == '-'
+            || chars[i] == '.'
+            || chars[i] == '/'
+        {
             regex.push(chars[i]);
             i += 1;
         } else {
@@ -307,7 +391,9 @@ fn simple_glob_match(pattern: &str, name: &str) -> bool {
         }
     }
     regex.push('$');
-    regex::Regex::new(&regex).map(|r| r.is_match(&name)).unwrap_or(false)
+    regex::Regex::new(&regex)
+        .map(|r| r.is_match(&name))
+        .unwrap_or(false)
 }
 
 /// Check if a file path matches an optional glob filter.

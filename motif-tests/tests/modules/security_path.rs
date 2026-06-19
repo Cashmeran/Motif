@@ -20,6 +20,9 @@ fn test_write_path_traversal() {
 #[test]
 fn test_edit_path_traversal() {
     let (_, tool) = motif_tools::edit::register().into_parts();
-    let result = common::call_tool(&tool, r#"{"file_path":"../evil.txt","old_string":"a","new_string":"b"}"#);
+    let result = common::call_tool(
+        &tool,
+        r#"{"file_path":"../evil.txt","old_string":"a","new_string":"b"}"#,
+    );
     assert!(result.contains("not allowed"), "Got: {}", result);
 }

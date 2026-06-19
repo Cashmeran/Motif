@@ -22,11 +22,18 @@ pub struct Config {
     pub extra_body: Option<serde_json::Map<String, serde_json::Value>>,
 }
 
-fn default_base_url() -> String { DEFAULT_BASE_URL.into() }
-fn default_model() -> String { DEFAULT_MODEL.into() }
+fn default_base_url() -> String {
+    DEFAULT_BASE_URL.into()
+}
+fn default_model() -> String {
+    DEFAULT_MODEL.into()
+}
 
 pub fn config_path() -> PathBuf {
-    dirs::home_dir().unwrap_or_default().join(".motif").join("config.json")
+    dirs::home_dir()
+        .unwrap_or_default()
+        .join(".motif")
+        .join("config.json")
 }
 
 pub fn load_or_create() -> Config {
@@ -34,7 +41,9 @@ pub fn load_or_create() -> Config {
 
     if path.exists() {
         if let Ok(data) = std::fs::read_to_string(&path) {
-            if let Ok(cfg) = serde_json::from_str::<Config>(&data) { return cfg; }
+            if let Ok(cfg) = serde_json::from_str::<Config>(&data) {
+                return cfg;
+            }
         }
     }
 
@@ -67,10 +76,13 @@ pub fn load_or_create() -> Config {
         streaming: Some(true),
         extra_body: None,
     };
-    if let Some(parent) = path.parent() { std::fs::create_dir_all(parent).ok(); }
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent).ok();
+    }
     if let Ok(json) = serde_json::to_string_pretty(&cfg) {
         if std::fs::write(&path, &json).is_ok() {
-            #[cfg(unix)] {
+            #[cfg(unix)]
+            {
                 use std::os::unix::fs::PermissionsExt;
                 std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).ok();
             }
@@ -86,11 +98,15 @@ pub fn make_agent(cfg: &Config) -> motif::Agent {
     use motif_tools;
 
     let mut provider = OpenAIProvider::new(&cfg.base_url, &cfg.api_key, &cfg.model);
-    if let Some(ref effort) = cfg.thinking_effort { provider = provider.with_thinking(effort); }
-    if let Some(ref extra) = cfg.extra_body {
-        for (k, v) in extra { provider = provider.with_body(k, v.clone()); }
+    if let Some(ref effort) = cfg.thinking_effort {
+        provider = provider.with_thinking(effort);
     }
-    
+    if let Some(ref extra) = cfg.extra_body {
+        for (k, v) in extra {
+            provider = provider.with_body(k, v.clone());
+        }
+    }
+
     Agent::new(provider)
         .history(motif_session::FileHistory::new(None))
         .model(&cfg.model)

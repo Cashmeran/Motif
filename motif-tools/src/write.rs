@@ -1,19 +1,22 @@
 //! File writing with safety checks.
 
-use motif::RegisteredTool;
-use motif::ToolDef;
 use crate::read_state;
 use crate::PROTECTED_FILES;
+use motif::RegisteredTool;
+use motif::ToolDef;
 use std::path::Path;
 
 const MAX_WRITE_SIZE: usize = 1_048_576; // 1MB
 
 pub fn register() -> RegisteredTool {
-    ToolDef::new("write", "Write content to a file. Creates parent directories as needed.")
-        .param::<String>("file_path", "Path to write to")
-        .param::<String>("content", "Content to write")
-        .concurrency(motif::tool::ConcurrencySafety::ConcurrentUnsafe)
-        .build(write_impl)
+    ToolDef::new(
+        "write",
+        "Write content to a file. Creates parent directories as needed.",
+    )
+    .param::<String>("file_path", "Path to write to")
+    .param::<String>("content", "Content to write")
+    .concurrency(motif::tool::ConcurrencySafety::ConcurrentUnsafe)
+    .build(write_impl)
 }
 
 fn write_impl(args: String) -> std::pin::Pin<Box<dyn std::future::Future<Output = String> + Send>> {
@@ -21,7 +24,9 @@ fn write_impl(args: String) -> std::pin::Pin<Box<dyn std::future::Future<Output 
         let v: serde_json::Value = serde_json::from_str(&args).unwrap_or_default();
         let file_path = v["file_path"].as_str().unwrap_or("").to_string();
         let content = v["content"].as_str().unwrap_or("").to_string();
-        if file_path.is_empty() { return "Error: 'file_path' is required".to_string(); }
+        if file_path.is_empty() {
+            return "Error: 'file_path' is required".to_string();
+        }
 
         let path = Path::new(&file_path);
 

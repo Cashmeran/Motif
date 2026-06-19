@@ -6,8 +6,12 @@ pub struct Status;
 
 #[async_trait::async_trait]
 impl Command for Status {
-    fn name(&self) -> &'static str { "status" }
-    fn desc(&self) -> &'static str { "Token/model info" }
+    fn name(&self) -> &'static str {
+        "status"
+    }
+    fn desc(&self) -> &'static str {
+        "Token/model info"
+    }
     async fn run(&self, agent: &mut Agent, _: &str, cfg: &Config, _: &Registry) -> Outcome {
         println!(
             "Model: {} | Tokens: {} | Messages: {}",
