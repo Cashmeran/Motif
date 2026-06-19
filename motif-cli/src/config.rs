@@ -17,7 +17,8 @@ pub struct Config {
     pub model: String,
     #[serde(default)]
     pub streaming: Option<bool>,
-    pub thinking_effort: Option<String>,
+    #[serde(default = "default_thinking_effort")]
+    pub thinking_effort: String,
     #[serde(default)]
     pub extra_body: Option<serde_json::Map<String, serde_json::Value>>,
 }
@@ -27,6 +28,9 @@ fn default_base_url() -> String {
 }
 fn default_model() -> String {
     DEFAULT_MODEL.into()
+}
+fn default_thinking_effort() -> String {
+    "max".into()
 }
 
 pub fn config_path() -> PathBuf {
@@ -52,7 +56,8 @@ pub fn load_or_create() -> Config {
             api_key: key,
             base_url: env::var("MOTIF_BASE_URL").unwrap_or_else(|_| DEFAULT_BASE_URL.into()),
             model: env::var("MOTIF_MODEL").unwrap_or_else(|_| DEFAULT_MODEL.into()),
-            thinking_effort: env::var("MOTIF_THINKING_EFFORT").ok(),
+            thinking_effort: env::var("MOTIF_THINKING_EFFORT")
+                .unwrap_or_else(|_| default_thinking_effort()),
             streaming: Some(true),
             extra_body: None,
         };
@@ -72,7 +77,7 @@ pub fn load_or_create() -> Config {
         api_key: key,
         base_url: DEFAULT_BASE_URL.into(),
         model: DEFAULT_MODEL.into(),
-        thinking_effort: None,
+        thinking_effort: default_thinking_effort(),
         streaming: Some(true),
         extra_body: None,
     };
@@ -98,9 +103,7 @@ pub fn make_agent(cfg: &Config) -> motif::Agent {
     use motif_tools;
 
     let mut provider = OpenAIProvider::new(&cfg.base_url, &cfg.api_key, &cfg.model);
-    if let Some(ref effort) = cfg.thinking_effort {
-        provider = provider.with_thinking(effort);
-    }
+    provider = provider.with_thinking(&cfg.thinking_effort);
     if let Some(ref extra) = cfg.extra_body {
         for (k, v) in extra {
             provider = provider.with_body(k, v.clone());

@@ -24,9 +24,7 @@ impl Command for ConfigCmd {
         println!("model:       {}", cfg.model);
         println!("api_key:     {}", mask_key(&cfg.api_key));
         println!("streaming:   {}", cfg.streaming.unwrap_or(true));
-        if let Some(ref e) = cfg.thinking_effort {
-            println!("thinking:    {}", e);
-        }
+        println!("thinking:    {}", cfg.thinking_effort);
         if let Some(ref extra) = cfg.extra_body {
             println!(
                 "extra_body:  {}",
