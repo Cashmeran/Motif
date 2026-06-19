@@ -2,13 +2,29 @@
 # Run: irm https://raw.githubusercontent.com/Cashmeran/Motif/main/install.ps1 | iex
 
 $ErrorActionPreference = "Stop"
-Write-Host "Installing Motif..." -ForegroundColor Cyan
+$Repo = "Cashmeran/Motif"
+$Version = "v0.3.1"
+$Binary = "motif-windows-x86_64.exe"
 
-if (!(Get-Command cargo -ErrorAction SilentlyContinue)) {
-    Write-Host "Rust is not installed. Install it from https://rustup.rs first." -ForegroundColor Red
-    exit 1
+Write-Host "Installing Motif $Version..." -ForegroundColor Cyan
+
+$Url = "https://github.com/$Repo/releases/download/$Version/$Binary"
+$Dest = "$env:USERPROFILE\.cargo\bin\motif.exe"
+
+Write-Host "  Downloading $Binary..."
+try {
+    Invoke-WebRequest -Uri $Url -OutFile "$env:TEMP\motif.exe" -ErrorAction Stop
+} catch {
+    Write-Host "Pre-built binary unavailable. Building from source..." -ForegroundColor Yellow
+    if (!(Get-Command cargo -ErrorAction SilentlyContinue)) {
+        Write-Host "Rust is not installed. Install it from https://rustup.rs first." -ForegroundColor Red
+        exit 1
+    }
+    cargo install --git "https://github.com/$Repo.git" motif-cli
+    Write-Host "✓ Motif installed from source. Run 'motif' to start." -ForegroundColor Green
+    exit 0
 }
 
-cargo install --git https://github.com/Cashmeran/Motif.git motif-cli
-
-Write-Host "✓ Motif installed. Run 'motif' to start." -ForegroundColor Green
+Move-Item -Force "$env:TEMP\motif.exe" $Dest
+Write-Host "✓ Motif $Version installed to $Dest" -ForegroundColor Green
+Write-Host "  Run 'motif' to start."

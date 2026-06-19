@@ -1,0 +1,75 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    outputs:
+      upload_url: ${{ steps.release.outputs.upload_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create GitHub Release
+        id: release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "Motif ${{ github.ref_name }}"
+          body: |
+            **Motif ${{ github.ref_name }}** — Minimal, extensible Rust agent core.
+
+            ### Install (pre-built binary)
+            ```bash
+            curl -fsSL https://raw.githubusercontent.com/Cashmeran/Motif/main/install.sh | bash
+            ```
+            ```powershell
+            irm https://raw.githubusercontent.com/Cashmeran/Motif/main/install.ps1 | iex
+            ```
+
+            ### From source
+            ```bash
+            cargo install --git https://github.com/Cashmeran/Motif.git motif-cli
+            ```
+          draft: false
+          prerelease: false
+
+  build:
+    needs: create-release
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            name: motif-linux-x86_64
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            name: motif-macos-x86_64
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            name: motif-macos-arm64
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            name: motif-windows-x86_64.exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "motif -> target"
+
+      - name: Build
+        run: cargo build --release -p motif-cli --target ${{ matrix.target }}
+
+      - name: Upload binary
+        uses: softprops/action-gh-release@v2
+        with:
+          files: target/${{ matrix.target }}/release/${{ matrix.name }}
+          upload_url: ${{ needs.create-release.outputs.upload_url }}
