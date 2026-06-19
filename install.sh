@@ -5,7 +5,7 @@
 set -e
 
 REPO="Cashmeran/Motif"
-VERSION="v0.3.1"
+VERSION="v0.3.0"
 
 echo "Installing Motif ${VERSION}..."
 

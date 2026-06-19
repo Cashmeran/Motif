@@ -3,7 +3,7 @@
 
 $ErrorActionPreference = "Stop"
 $Repo = "Cashmeran/Motif"
-$Version = "v0.3.1"
+$Version = "v0.3.0"
 $Binary = "motif-windows-x86_64.exe"
 
 Write-Host "Installing Motif $Version..." -ForegroundColor Cyan
