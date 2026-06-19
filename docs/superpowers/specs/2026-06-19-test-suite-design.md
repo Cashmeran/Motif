@@ -327,20 +327,26 @@ impl Drop for TempDir { fn drop(&mut self) { fs::remove_dir_all(&self.path).ok()
 
 ## 五、迁移策略
 
-原有测试不删除，分两步走：
+分三步走，达到源码零 `#[cfg(test)]`：
 
-1. **新建 motif-tests crate**，写全部新测试（core/、security/、stress/、cli/、macros/、live/ 的 NEW 部分）
-2. **迁移已有测试**：从 motif/tests/integration.rs 迁移 25 mock + 13 live，从 motif-tools/tests/tool_tests.rs 迁移 42 个
-3. **删除原文件**，保持 `#[cfg(test)]` 模块不动
+1. **新建 motif-tests crate**，写全部新测试（core/、security/、stress/、cli/、macros/、live/）
+2. **迁移已有测试**：从各源码 `#[cfg(test)]` 迁移 45 个内部单元测试（改为公开 API 调用），从 motif/tests/integration.rs 迁移 25 mock + 13 live，从 motif-tools/tests/tool_tests.rs 迁移 42 个
+3. **删除所有源码内测试**：移除 agent.rs、hooks.rs、tool.rs、provider.rs、history.rs、prompt.rs、bash.rs、web_fetch.rs、session/lib.rs 中的 `#[cfg(test)]` 模块，删除 motif/tests/integration.rs、motif-tools/tests/tool_tests.rs
 
 最终测试分布：
 
 | 位置 | 数量 | 类型 |
 |------|------|------|
-| 源码内 `#[cfg(test)]` | ~45 | 内部函数单元测试 |
-| motif-tests/tests/ | ~180 | 集成/安全/压力/CLI/macro |
-| motif-tests/live/ | ~16 | 真实 API（#[ignore]） |
-| **总计** | **~240** | |
+| motif-tests/tests/core/ | ~45 | Agent/Provider/Hooks/Types/Error/Prompt |
+| motif-tests/tests/tools/ | ~55 | 6 工具全量 |
+| motif-tests/tests/security/ | ~25 | 注入/SSRF/路径/引号 |
+| motif-tests/tests/stress/ | ~10 | 并发/大IO/长运行 |
+| motif-tests/tests/cli/ | ~10 | 命令/配置 |
+| motif-tests/tests/macros/ | ~10 | proc-macro + trybuild |
+| motif-tests/tests/live/ | ~16 | 真实 API（#[ignore]） |
+| **总计** | **~170** | 全部在一个独立 crate |
+
+源码零测试代码，核心和测试完全分离。
 
 ---
 
@@ -367,5 +373,5 @@ serde_json = "1"
 
 - 不引入 property-based testing（proptest/quickcheck）——当前阶段不需要
 - 不引入 benchmark（criterion）——性能基准等 v0.3
-- 不修改任何源码的 `#[cfg(test)]` 模块——保持不动
+- 移除所有源码内的 `#[cfg(test)]` 模块——测试完全在独立 crate 中
 - 不引入 code coverage CI——手动用 cargo tarpaulin
