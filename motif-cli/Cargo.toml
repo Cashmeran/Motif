@@ -10,7 +10,7 @@ documentation = "https://docs.rs/motif-cli"
 readme = "../README.md"
 
 [[bin]]
-name = "motif"
+name = "motif-cli"
 path = "src/main.rs"
 
 [dependencies]

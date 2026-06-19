@@ -72,7 +72,7 @@ jobs:
           workspaces: "motif -> target"
 
       - name: Build
-        run: cargo build --release -p motif-cli --target ${{ matrix.target }}
+        run: cargo build --release -p motif-tui --target ${{ matrix.target }}
 
       - name: Rename binary
         shell: bash

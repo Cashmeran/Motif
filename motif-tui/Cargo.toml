@@ -7,6 +7,10 @@ license = "MIT"
 repository = "https://github.com/Cashmeran/Motif"
 publish = false
 
+[[bin]]
+name = "motif"
+path = "src/main.rs"
+
 [dependencies]
 motif = { path = "../motif" }
 motif-cli = { path = "../motif-cli" }
