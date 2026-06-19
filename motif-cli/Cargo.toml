@@ -9,10 +9,6 @@ homepage = "https://github.com/Cashmeran/Motif"
 documentation = "https://docs.rs/motif-cli"
 readme = "../README.md"
 
-[[bin]]
-name = "motif-cli"
-path = "src/main.rs"
-
 [dependencies]
 motif = { path = "../motif" }
 motif-tools = { path = "../motif-tools" }
