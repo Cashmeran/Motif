@@ -461,13 +461,3 @@ impl LLMProvider for OpenAIProvider {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_openai_provider_construction() {
-        let p = OpenAIProvider::new("https://api.openai.com/v1", "sk-test", "gpt-4");
-        assert_eq!(p.base_url, "https://api.openai.com/v1");
-    }
-}

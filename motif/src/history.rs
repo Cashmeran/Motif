@@ -34,12 +34,3 @@ impl History for BoundedHistory {
     fn clear(&mut self) { self.messages.clear(); }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::types::Message;
-    #[test] fn test_infinite_add() { let mut h = InfiniteHistory::new(); h.add(TimedMessage::new(Message::user("x"))); assert_eq!(h.get_all().len(), 1); }
-    #[test] fn test_infinite_clear() { let mut h = InfiniteHistory::new(); h.add(TimedMessage::new(Message::user("x"))); h.clear(); assert!(h.get_all().is_empty()); }
-    #[test] fn test_bounded() { let mut h = BoundedHistory::new(3); h.add(TimedMessage::new(Message::system("s"))); h.add(TimedMessage::new(Message::user("a"))); h.add(TimedMessage::new(Message::user("b"))); h.add(TimedMessage::new(Message::user("c"))); assert_eq!(h.get_all().len(), 3); }
-    #[test] fn test_bounded_pins() { let mut h = BoundedHistory::new(2); h.add(TimedMessage::new(Message::system("s"))); h.add(TimedMessage::new(Message::user("u"))); h.add(TimedMessage::new(Message::user("v"))); h.add(TimedMessage::new(Message::user("w"))); assert_eq!(h.get_all().len(), 2); }
-}

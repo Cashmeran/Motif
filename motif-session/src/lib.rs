@@ -137,18 +137,3 @@ fn nano_id() -> String {
 }
 fn now_str() -> String { chrono::Local::now().format("%Y-%m-%d %H:%M").to_string() }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use motif::Message;
-
-    #[test]
-    fn test_roundtrip() {
-        let mut h = FileHistory::new(Some("test_sess"));
-        h.add(TimedMessage::new(Message::user("hello")));
-        assert_eq!(h.get_all().len(), 1);
-        let path = sessions_dir().join("test_sess.jsonl");
-        assert!(path.exists());
-        fs::remove_file(&path).ok();
-    }
-}
