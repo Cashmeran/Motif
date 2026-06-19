@@ -295,3 +295,123 @@ fn test_web_fetch_empty_url() {
     let result = call_tool(&tool, r#"{"url":""}"#);
     assert!(result.contains("required"), "Got: {}", result);
 }
+
+// ── Bash: metachar detection ──
+
+#[test]
+fn test_bash_unquoted_dollar_var_blocked() {
+    let (_, b_tool) = bash::register().into_parts();
+    let result = call_tool(&b_tool, r#"{"command":"echo $HOME","timeout_ms":5000}"#);
+    assert!(result.contains("not allowed"), "Should block unquoted $VAR: {}", result);
+}
+
+#[test]
+fn test_bash_unquoted_dollar_subshell_blocked() {
+    let (_, b_tool) = bash::register().into_parts();
+    let result = call_tool(&b_tool, r#"{"command":"echo $(whoami)","timeout_ms":5000}"#);
+    assert!(result.contains("not allowed"), "Should block $(): {}", result);
+}
+
+#[test]
+fn test_bash_backtick_blocked() {
+    let (_, b_tool) = bash::register().into_parts();
+    let result = call_tool(&b_tool, r#"{"command":"echo `whoami`","timeout_ms":5000}"#);
+    assert!(result.contains("not allowed"), "Should block backtick: {}", result);
+}
+
+#[test]
+fn test_bash_unquoted_glob_blocked() {
+    let (_, b_tool) = bash::register().into_parts();
+    let result = call_tool(&b_tool, r#"{"command":"ls *.rs","timeout_ms":5000}"#);
+    assert!(result.contains("not allowed"), "Should block unquoted glob: {}", result);
+}
+
+#[test]
+fn test_bash_quoted_dollar_allowed() {
+    let (_, b_tool) = bash::register().into_parts();
+    let result = call_tool(&b_tool, r#"{"command":"echo \"$HOME\"","timeout_ms":5000}"#);
+    // $VAR expands even in double quotes — should still be blocked
+    assert!(result.contains("not allowed"), "Should block $ in double quotes: {}", result);
+}
+
+#[test]
+fn test_bash_escaped_dollar_allowed() {
+    let (_, b_tool) = bash::register().into_parts();
+    let result = call_tool(&b_tool, r#"{"command":"echo \\$var","timeout_ms":5000}"#);
+    assert!(!result.contains("not allowed"), "Should allow escaped \\$: {}", result);
+}
+
+// ── Path traversal ──
+
+#[test]
+fn test_read_path_traversal_blocked() {
+    let (_, registered) = read::register().into_parts();
+    let result = call_tool(&registered, r#"{"file_path":"../etc/passwd"}"#);
+    assert!(result.contains("not allowed"), "Got: {}", result);
+}
+
+#[test]
+fn test_write_path_traversal_blocked() {
+    let (_, w_tool) = write::register().into_parts();
+    let result = call_tool(&w_tool, r#"{"file_path":"../evil.txt","content":"x"}"#);
+    assert!(result.contains("not allowed"), "Got: {}", result);
+}
+
+#[test]
+fn test_edit_path_traversal_blocked() {
+    let (_, tool) = edit::register().into_parts();
+    let result = call_tool(&tool, r#"{"file_path":"../evil.txt","old_string":"a","new_string":"b"}"#);
+    assert!(result.contains("not allowed"), "Got: {}", result);
+}
+
+// ── Read-before-edit enforcement ──
+
+#[test]
+fn test_edit_without_read_blocked() {
+    fs::write("test_noread.txt", "content").unwrap();
+    let (_, tool) = edit::register().into_parts();
+    let result = call_tool(&tool, r#"{"file_path":"test_noread.txt","old_string":"content","new_string":"x"}"#);
+    assert!(result.contains("has not been read"), "Should block edit without prior read: {}", result);
+    fs::remove_file("test_noread.txt").ok();
+}
+
+#[test]
+fn test_write_existing_without_read_blocked() {
+    fs::write("test_noread_write.txt", "old").unwrap();
+    let (_, w_tool) = write::register().into_parts();
+    let result = call_tool(&w_tool, r#"{"file_path":"test_noread_write.txt","content":"new"}"#);
+    assert!(result.contains("has not been read"), "Should block write without prior read: {}", result);
+    fs::remove_file("test_noread_write.txt").ok();
+}
+
+// ── Edit: quote normalization ──
+
+#[test]
+fn test_edit_quote_normalization_curly_to_straight() {
+    // File has curly quotes, LLM sends straight quotes
+    fs::write("test_curly.txt", "He said \u{201c}hello\u{201d} world").unwrap();
+    let (_, r_tool) = read::register().into_parts();
+    let (_, tool) = edit::register().into_parts();
+    let _ = call_tool(&r_tool, r#"{"file_path":"test_curly.txt"}"#);
+    let result = call_tool(&tool, r#"{"file_path":"test_curly.txt","old_string":"He said \"hello\" world","new_string":"Replaced"}"#);
+    assert!(result.contains("Edited"), "Should normalize straight→curly quotes: {}", result);
+    let content = fs::read_to_string("test_curly.txt").unwrap();
+    assert_eq!(content, "Replaced");
+    fs::remove_file("test_curly.txt").ok();
+}
+
+#[test]
+fn test_edit_quote_normalization_straight_to_curly() {
+    // File has straight quotes, LLM sends curly quotes
+    fs::write("test_straight.txt", "He said \"hello\" world").unwrap();
+    let (_, r_tool) = read::register().into_parts();
+    let (_, tool) = edit::register().into_parts();
+    let _ = call_tool(&r_tool, r#"{"file_path":"test_straight.txt"}"#);
+    let curly_old = "He said \u{201c}hello\u{201d} world";
+    let args = format!(r#"{{"file_path":"test_straight.txt","old_string":"{}","new_string":"Replaced"}}"#, curly_old);
+    let result = call_tool(&tool, &args);
+    assert!(result.contains("Edited"), "Should normalize curly→straight quotes: {}", result);
+    let content = fs::read_to_string("test_straight.txt").unwrap();
+    assert_eq!(content, "Replaced");
+    fs::remove_file("test_straight.txt").ok();
+}

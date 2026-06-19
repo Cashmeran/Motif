@@ -181,3 +181,69 @@ fn writeln_debug(buf: &mut String, s: &str) -> std::fmt::Result {
     buf.push_str(s);
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_metachar_unquoted_dollar_var_blocked() {
+        assert!(detect_unquoted_metachars("echo $HOME").is_some());
+    }
+
+    #[test]
+    fn test_metachar_unquoted_dollar_subshell_blocked() {
+        assert!(detect_unquoted_metachars("echo $(whoami)").is_some());
+    }
+
+    #[test]
+    fn test_metachar_unquoted_dollar_brace_blocked() {
+        assert!(detect_unquoted_metachars("echo ${HOME}").is_some());
+    }
+
+    #[test]
+    fn test_metachar_backtick_blocked() {
+        assert!(detect_unquoted_metachars("echo `whoami`").is_some());
+    }
+
+    #[test]
+    fn test_metachar_unquoted_glob_star_blocked() {
+        assert!(detect_unquoted_metachars("ls *.rs").is_some());
+    }
+
+    #[test]
+    fn test_metachar_unquoted_glob_question_blocked() {
+        assert!(detect_unquoted_metachars("ls file?.rs").is_some());
+    }
+
+    #[test]
+    fn test_metachar_double_quoted_dollar_blocked() {
+        // $VAR still expands inside double quotes in shell
+        assert!(detect_unquoted_metachars("echo \"$HOME\"").is_some());
+    }
+
+    #[test]
+    fn test_metachar_single_quoted_dollar_allowed() {
+        assert!(detect_unquoted_metachars("echo '$HOME'").is_none());
+    }
+
+    #[test]
+    fn test_metachar_escaped_dollar_allowed() {
+        assert!(detect_unquoted_metachars("echo \\$HOME").is_none());
+    }
+
+    #[test]
+    fn test_metachar_quoted_glob_allowed() {
+        assert!(detect_unquoted_metachars("echo \"*.rs\"").is_none());
+    }
+
+    #[test]
+    fn test_metachar_safe_command_allowed() {
+        assert!(detect_unquoted_metachars("echo hello world").is_none());
+    }
+
+    #[test]
+    fn test_metachar_dollar_in_single_quotes_allowed() {
+        assert!(detect_unquoted_metachars("awk '{print $1}' file.txt").is_none());
+    }
+}

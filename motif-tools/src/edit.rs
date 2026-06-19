@@ -126,6 +126,11 @@ fn normalize_quotes(needle: &str, haystack: &str) -> Option<String> {
         if haystack.contains(&curly) { return Some(curly); }
         let curly2 = needle.replace('"', "\u{201d}");
         if haystack.contains(&curly2) { return Some(curly2); }
+        // Pair: first " → left, second " → right (when exactly 2 straight quotes)
+        if needle.matches('"').count() == 2 {
+            let paired = needle.replacen('"', "\u{201c}", 1).replacen('"', "\u{201d}", 1);
+            if haystack.contains(&paired) { return Some(paired); }
+        }
     }
 
     // Curly double → straight
