@@ -71,9 +71,9 @@ agent.stop_when(StopCondition::Custom(Arc::new(|resp, _history| {
 })));
 ```
 
-### 生命周期 Hook（9 个方法）
+### 生命周期 Hook（15 个方法）
 
-`before_llm`、`after_llm`、`before_tools`、`after_tools`、`before_run`、`after_run`、`on_error`、`on_stream_delta`、`finalize_content`。全部默认空操作，按需实现。单个 hook 的错误不影响其他 hook 执行。
+`before_run`、`after_run`、`on_finally`、`before_llm`、`after_llm`、`before_tools`、`after_tools`、`on_message`、`on_stop_check`、`on_error`、`on_stream_delta`、`on_stream_end`、`on_reasoning_delta`、`wants_streaming`、`finalize_content`。全部默认空操作，按需实现。单个 hook 的错误不影响其他 hook 执行。
 
 ### 三层提示词缓存
 
@@ -125,10 +125,13 @@ src/
 │   ├── config.rs     配置加载 + agent 创建
 │   └── keybind.rs    快捷键骨架
 ├── tools/          ← 内建工具（可选）
-│   ├── search.rs     grep + glob 合一
-│   ├── read.rs       文件读取
-│   ├── write.rs      文件写入
-│   └── bash.rs       命令执行
+│   ├── search.rs     grep + glob 合一（** 支持）
+│   ├── read.rs       文件读取（读后编辑强制）
+│   ├── write.rs      文件写入（读后编辑强制）
+│   ├── edit.rs       精确字符串替换（引号规范化）
+│   ├── web_fetch.rs  HTTP 获取（SSRF 防护）
+│   ├── bash.rs       命令执行（元字符检测）
+│   └── read_state.rs 读后编辑共享状态
 └── lib.rs
 ```
 
@@ -140,7 +143,7 @@ src/
 | 代码量 | ~2,500 行 | ~920 行 | ~15,000 行 | ~120,000 行 |
 | 定位 | 通用核心库 | 通用核心库 | 全栈 agent | 编码 agent |
 | 终止条件 | 5 种可配置 | 1 种 | 1 种 | 1 种 |
-| Hook 系统 | 9 方法 | 无 | 12 方法 | 有 |
+| Hook 系统 | 15 方法 | 无 | 12 方法 | 有 |
 | 工具宏 | `#[tool]` fn+impl | `#[tool]` fn | decorator | 手动注册 |
 | 提示词缓存 | 3 层指纹 | 无 | Jinja2 | 无 |
 | Provider | OpenAI 系列 | OpenAI 系列 | 10+ provider | 10+ provider |
@@ -149,10 +152,10 @@ src/
 
 ## 测试
 
-72 mock + 13 live（真实 DeepSeek API 调用）。零 unsafe。
+79 mock + 13 live（真实 DeepSeek API 调用）。零 unsafe。
 
 ```bash
-cargo test                                    # 72 mock
+cargo test                                    # 79 mock
 MOTIF_API_KEY=sk-... cargo test -- --ignored  # +13 live
 ```
 

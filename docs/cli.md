@@ -80,7 +80,9 @@ pub enum Outcome { Continue, Exit, PassToAgent(String) }
 
 CLI 默认注册 3 个工具：`search`、`read`、`write`。取消注册编辑 `config.rs` 中的 `make_agent`。
 
-要注册 `bash` 工具：
+要注册额外工具（`edit`、`web_fetch`、`bash`）：
 ```rust
-.tool(motif_tools::bash::register()) // 需手动添加
+.tool(motif_tools::edit::register())
+.tool(motif_tools::web_fetch::register())
+.tool(motif_tools::bash::register()) // 需手动添加（安全考量）
 ```

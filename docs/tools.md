@@ -1,6 +1,6 @@
 # Tools
 
-4 个通用工具，位于 `motif-tools` crate。每个导出 `register() -> RegisteredTool` 函数。
+6 个通用工具，位于 `motif-tools` crate。每个导出 `register() -> RegisteredTool` 函数。
 
 ## 安装
 
@@ -11,12 +11,14 @@ cargo add motif-tools
 ## 注册
 
 ```rust
-use motif_tools::{search, read, write, bash};
+use motif_tools::{search, read, write, edit, web_fetch, bash};
 
 agent
     .tool(search::register())
     .tool(read::register())
-    .tool(write::register());
+    .tool(write::register())
+    .tool(edit::register())
+    .tool(web_fetch::register());
     // bash::register() 默认不注册（安全问题），手动添加
 ```
 
@@ -50,6 +52,14 @@ agent
 | `files_with_matches` | 只列文件名，按修改时间降序 |
 | `count` | 每文件显示匹配数 |
 | `filename` | glob 文件名匹配，按修改时间降序 |
+
+### Glob 语法
+
+- `*` — 匹配单个路径组件内的任意字符（不跨 `/`）
+- `**` — 跨目录边界匹配（`**/` 匹配零或多级目录，`**` 匹配一切）
+- `?` — 匹配单个非 `/` 字符
+- `{a,b,c}` — 花括号展开（如 `*.{rs,toml}` 匹配 `.rs` 和 `.toml`）
+- `glob` 参数无路径分隔符时仅匹配文件名；包含 `/` 或 `**` 时匹配完整路径
 
 ### 排除规则
 
@@ -86,6 +96,7 @@ agent
 - 禁止读取：`.env`、`.gitconfig`、`id_rsa`、`.bashrc` 等
 - 禁止读取设备文件：`/dev/zero`、`/dev/random`、`/proc/*/fd/*`
 - 拒绝路径遍历：包含 `..` 的路径
+- 每次成功读取自动记录 mtime，用于 edit/write 的**读后编辑强制**
 
 ---
 
@@ -106,6 +117,64 @@ agent
 - 禁止写入保护文件（与 read 相同列表）
 - 最大内容：1MB
 - 拒绝路径遍历
+- **读后编辑强制**：已存在的文件必须被 read 工具读过后才能写入（新文件不受限）
+
+---
+
+## edit —— 精确字符串替换
+
+基于唯一匹配的安全文件编辑。`old_string` 必须在文件中恰好出现一次，否则拒绝编辑。
+
+### 参数
+
+| 参数 | 类型 | 默认 | 说明 |
+|------|------|------|------|
+| `file_path` | string | —（必填） | 编辑文件路径 |
+| `old_string` | string | —（必填） | 要替换的精确字符串，必须在文件中唯一 |
+| `new_string` | string | —（必填） | 替换后的字符串 |
+| `replace_all` | bool | `false` | 替换所有匹配项（绕过唯一性检查） |
+
+### 特殊行为
+
+- **空 old_string**：完整覆写文件（等同于 write）
+- **old_string == new_string**：幂等拒绝，不做任何修改
+- **唯一性检查**：非 `replace_all` 模式下，`old_string` 出现 ≠ 1 次则拒绝
+- **引号规范化**：自动处理直引号/弯引号的差异（`"` ↔ `\u{201c}` / `\u{201d}`，`'` ↔ `\u{2018}`），双向尝试
+
+### 安全限制
+
+- 最大文件大小：1 MiB
+- 最大 old_string 长度：10,000 字符
+- **读后编辑强制**：文件必须先被 read 工具读取才能编辑
+- 拒绝路径遍历
+
+---
+
+## web_fetch —— HTTP 内容获取
+
+HTTP GET 请求，自动提取和格式化内容。HTML 页面转为纯文本，JSON 响应美化为缩进格式。
+
+### 参数
+
+| 参数 | 类型 | 默认 | 说明 |
+|------|------|------|------|
+| `url` | string | —（必填） | HTTP/HTTPS URL |
+| `timeout_ms` | int | `15000` | 超时（毫秒） |
+
+### 内容处理
+
+| 输入类型 | 处理方式 |
+|----------|---------|
+| HTML | 标签剥离，保留块级换行，HTML 实体解码 |
+| JSON | `serde_json::to_string_pretty` 美化 |
+| 纯文本 | 原样返回 |
+
+### 安全保护
+
+- **SSRF 防护**：解析到私有 IP（loopback、private、link-local）时拒绝
+- **跨域重定向拦截**：最终 URL 的 host 与原始 host 不同时拒绝
+- 最大响应体：1 MiB
+- 最大重定向次数：5
 
 ---
 
@@ -123,17 +192,17 @@ agent
 
 ### 安全检测
 
-自动拒绝以下模式：
+**破坏性模式拦截**（大小写不敏感）：`rm -rf`、`rm -r`、`rmdir`、`sudo`、`su`、`chmod 777`、`mkfs.`、`dd if=`、`shutdown`、`reboot`、`halt`、`poweroff`、`git push --force`/`-f`、fork bomb、`> /dev/sda`、Zsh 危险内置（`zmodload`、`emulate`、`sysopen`、`ztcp`、`zpty`）。
 
-| 模式 | 说明 |
-|------|------|
-| `rm -rf`、`rm -r` | 递归删除 |
-| `sudo`、`su` | 提权操作 |
-| `chmod 777` | 开放权限 |
-| `mkfs`、`dd if=` | 磁盘操作 |
-| `shutdown`、`reboot` | 系统控制 |
-| `git push --force` | 强制推送 |
-| fork bomb (`(){ :\|:& };:`) | 资源耗尽 |
+**未引用元字符检测**（逐字符追踪引号状态）：
+
+| 模式 | 检测对象 |
+|------|---------|
+| `$VAR`、`$()`、`${}` | 未引用的 Shell 变量/命令展开 |
+| `` `cmd` `` | 反引号命令替换 |
+| `?`、`*` | 未引用的 glob 通配符 |
+
+引号内的元字符安全放行（如 `"$HOME"`、`'*.rs'`），转义的也放行（`\$var`）。
 
 ### 行为
 

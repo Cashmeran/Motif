@@ -54,13 +54,16 @@ Motif/                              # workspace（只有 Cargo.toml）
 │           └── load.rs
 │
 ├── motif-tools/                    # 通用工具包（独立 crate）
-│   ├── Cargo.toml                  # 依赖 motif + regex
+│   ├── Cargo.toml                  # 依赖 motif + regex + reqwest
 │   └── src/
-│       ├── lib.rs                  # pub use
-│       ├── search.rs               # grep + glob 合一
-│       ├── read.rs                 # 文件读取（offset/limit）
-│       ├── write.rs                # 文件写入（保护文件检测）
-│       └── bash.rs                 # 命令执行（超时 + 危险命令检测）
+│       ├── lib.rs                  # pub use + 共用常量
+│       ├── search.rs               # grep + glob 合一（** 跨目录匹配）
+│       ├── read.rs                 # 文件读取（offset/limit + 读后记录）
+│       ├── write.rs                # 文件写入（保护文件 + 读后检查）
+│       ├── edit.rs                 # 精确替换（唯一性 + 引号规范化 + 读后检查）
+│       ├── web_fetch.rs            # HTTP 获取（HTML→text + SSRF 防护）
+│       ├── bash.rs                 # 命令执行（超时 + 破坏性模式 + 元字符检测）
+│       └── read_state.rs           # 读后编辑共享状态（LazyLock<Mutex>）
 │
 └── motif-session/                  # 会话持久化（独立 crate）
     ├── Cargo.toml                  # 依赖 motif + chrono + dirs
