@@ -1,5 +1,3 @@
-//! Web fetch tool tests.
-
 use crate::common;
 use motif::*;
 use motif_tools;
